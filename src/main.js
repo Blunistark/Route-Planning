@@ -364,6 +364,132 @@ function bindUIEvents() {
     };
     reader.readAsDataURL(file);
   });
+
+  // Bulk Font Application to All Labels
+  const btnApplyBulkFont = document.getElementById('btnApplyBulkFont');
+  const bulkFontFamily = document.getElementById('bulkFontFamily');
+  const bulkFontSize = document.getElementById('bulkFontSize');
+
+  btnApplyBulkFont?.addEventListener('click', () => {
+    const chosenFont = bulkFontFamily?.value || 'Plus Jakarta Sans';
+    const chosenSize = parseInt(bulkFontSize?.value, 10) || 11;
+    if (appState.permanentLabels) {
+      appState.permanentLabels.forEach(lbl => {
+        lbl.fontFamily = chosenFont;
+        lbl.fontSize = chosenSize;
+      });
+      renderPermanentLabels();
+      updateSidebarLists();
+    }
+  });
+
+  // Batch Multi-Line Labels Modal
+  const btnBatchLabelsModal = document.getElementById('btnBatchLabelsModal');
+  const batchLabelsModal = document.getElementById('batchLabelsModal');
+  const btnCloseBatchLabelsModal = document.getElementById('btnCloseBatchLabelsModal');
+  const btnCancelBatchLabels = document.getElementById('btnCancelBatchLabels');
+  const btnConfirmBatchLabels = document.getElementById('btnConfirmBatchLabels');
+  const batchLabelsInput = document.getElementById('batchLabelsInput');
+  const batchFontFamily = document.getElementById('batchFontFamily');
+  const batchFontSize = document.getElementById('batchFontSize');
+  const batchStylePreset = document.getElementById('batchStylePreset');
+
+  btnBatchLabelsModal?.addEventListener('click', () => {
+    batchLabelsModal?.classList.remove('hidden');
+    if (batchLabelsInput) {
+      batchLabelsInput.value = '';
+      setTimeout(() => batchLabelsInput.focus(), 60);
+    }
+  });
+
+  const closeBatchModal = () => batchLabelsModal?.classList.add('hidden');
+  btnCloseBatchLabelsModal?.addEventListener('click', closeBatchModal);
+  btnCancelBatchLabels?.addEventListener('click', closeBatchModal);
+
+  btnConfirmBatchLabels?.addEventListener('click', () => {
+    const text = batchLabelsInput?.value?.trim();
+    if (!text) {
+      closeBatchModal();
+      return;
+    }
+
+    if (!appState.permanentLabels) appState.permanentLabels = [];
+
+    // Blocks separated by double newline, or lines if no double newline
+    let blocks = text.includes('\n\n')
+      ? text.split(/\n\s*\n/)
+      : text.split('\n');
+
+    blocks = blocks.map(b => b.trim()).filter(Boolean);
+
+    const fFamily = batchFontFamily?.value || 'Plus Jakarta Sans';
+    const fSize = parseInt(batchFontSize?.value, 10) || 11;
+    const fStyle = batchStylePreset?.value || 'default';
+
+    // Center coordinates or evenly spread on the map
+    const centerX = canvasEngine.naturalWidth > 0 ? canvasEngine.naturalWidth / 2 : 600;
+    const centerY = canvasEngine.naturalHeight > 0 ? canvasEngine.naturalHeight / 2 : 450;
+    const radius = 180;
+
+    blocks.forEach((blockText, idx) => {
+      const angle = (idx / Math.max(1, blocks.length)) * Math.PI * 2;
+      const x = Math.round(centerX + Math.cos(angle) * radius);
+      const y = Math.round(centerY + Math.sin(angle) * radius);
+
+      appState.permanentLabels.push({
+        id: `label-${Date.now()}-${idx}`,
+        text: blockText,
+        x: x,
+        y: y,
+        fontFamily: fFamily,
+        fontSize: fSize,
+        style: fStyle
+      });
+    });
+
+    closeBatchModal();
+    renderPermanentLabels();
+    updateSidebarLists();
+
+    // Switch to labels tab
+    const tabLabels = document.querySelector('.tab-btn[data-tab="labels"]');
+    if (tabLabels) tabLabels.click();
+  });
+
+  // Waypoint Popover Actions (Splitting and Branching Paths)
+  const btnCloseWaypointPopover = document.getElementById('btnCloseWaypointPopover');
+  const btnPopoverSplitRoute = document.getElementById('btnPopoverSplitRoute');
+  const btnPopoverBranchRoute = document.getElementById('btnPopoverBranchRoute');
+
+  btnCloseWaypointPopover?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideWaypointPopover();
+  });
+
+  btnPopoverSplitRoute?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (activeWaypointContext) {
+      const { route, waypointIdx } = activeWaypointContext;
+      hideWaypointPopover();
+      drawingTools.splitRoute(route.id, waypointIdx);
+    }
+  });
+
+  btnPopoverBranchRoute?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (activeWaypointContext) {
+      const { route, waypointIdx } = activeWaypointContext;
+      hideWaypointPopover();
+      drawingTools.branchRoute(route.id, waypointIdx);
+    }
+  });
+
+  // Click outside closes waypoint popover
+  window.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('#waypointContextPopover') && !e.target.closest('.waypoint-handle')) {
+      hideWaypointPopover();
+    }
+  });
 }
 
 function updatePlayPauseIcon(isPlaying) {
@@ -424,7 +550,46 @@ export function renderAllLayers() {
   document.getElementById('badgeZonesCount').textContent = appState.zones.length;
 }
 
-// Render Permanent Labels
+// Ensure SVG Arrowhead Markers are defined for all route colors
+function ensureSvgMarkers() {
+  const stageSvg = document.getElementById('stageSvg');
+  if (!stageSvg) return;
+
+  let defs = stageSvg.querySelector('defs');
+  if (!defs) {
+    defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    stageSvg.prepend(defs);
+  }
+
+  const colors = new Set(['#DC2626', '#2563EB', '#D97706', '#16A34A', '#7C3AED', '#0F172A', '#38BDF8', '#475569']);
+  appState.routes.forEach(r => {
+    if (r.color) colors.add(r.color);
+  });
+
+  let markersHtml = '';
+  colors.forEach(col => {
+    const clean = col.replace(/[^a-zA-Z0-9]/g, '');
+    // Standard End Arrow
+    markersHtml += `
+      <marker id="arrow-end-${clean}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="${col}" />
+      </marker>
+      <marker id="arrow-start-${clean}" viewBox="0 0 10 10" refX="2" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+        <path d="M 9 1.5 L 0 5 L 9 8.5 z" fill="${col}" />
+      </marker>
+      <marker id="arrow-end-lg-${clean}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9.5" markerHeight="9.5" orient="auto-start-reverse">
+        <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="${col}" />
+      </marker>
+      <marker id="arrow-start-lg-${clean}" viewBox="0 0 10 10" refX="2" refY="5" markerWidth="9.5" markerHeight="9.5" orient="auto">
+        <path d="M 9 1.5 L 0 5 L 9 8.5 z" fill="${col}" />
+      </marker>
+    `;
+  });
+
+  defs.innerHTML = markersHtml;
+}
+
+// Render Permanent Labels (supports custom font family, size, preset style, and multi-line text)
 function renderPermanentLabels() {
   stagePermanentLabelsLayer.innerHTML = '';
   if (!appState.permanentLabels) appState.permanentLabels = [];
@@ -435,7 +600,20 @@ function renderPermanentLabels() {
     el.setAttribute('data-label-id', lbl.id);
     el.style.left = `${lbl.x}px`;
     el.style.top = `${lbl.y}px`;
-    el.textContent = lbl.text;
+
+    // Apply custom typography
+    if (lbl.fontFamily) {
+      el.style.fontFamily = `'${lbl.fontFamily}', system-ui, sans-serif`;
+    }
+    if (lbl.fontSize) {
+      el.style.fontSize = `${lbl.fontSize}px`;
+    }
+    if (lbl.fontWeight) {
+      el.style.fontWeight = lbl.fontWeight;
+    }
+
+    // innerText preserves multi-line breaks with white-space: pre-line
+    el.innerText = lbl.text;
 
     // Pointer down for dragging label
     el.addEventListener('pointerdown', (e) => {
@@ -487,8 +665,21 @@ function renderStopsPins() {
       <div class="pin-tooltip-label">${stop.title}</div>
     `;
 
+    let pinPointerDown = null;
+
+    pin.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      pinPointerDown = { x: e.clientX, y: e.clientY };
+      drawingTools.draggingStop = stop.id;
+    });
+
     pin.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (pinPointerDown) {
+        const moved = Math.hypot(e.clientX - pinPointerDown.x, e.clientY - pinPointerDown.y);
+        pinPointerDown = null;
+        if (moved > 5) return;
+      }
       appState.selectedStopId = stop.id;
       canvasEngine.panTo(stop.x, stop.y, 1.35, 450);
       if (appState.showDialogOnFocus !== false) {
@@ -501,29 +692,91 @@ function renderStopsPins() {
   });
 }
 
+// Waypoint popover state
+let activeWaypointContext = null;
+
+function showWaypointPopover(route, waypointIdx, pt) {
+  const popover = document.getElementById('waypointContextPopover');
+  const title = document.getElementById('waypointPopoverTitle');
+  if (!popover || !title) return;
+
+  activeWaypointContext = { route, waypointIdx, pt };
+  title.textContent = `${route.title || 'Corridor'} (Point ${waypointIdx + 1})`;
+
+  popover.style.left = `${pt.x}px`;
+  popover.style.top = `${pt.y}px`;
+  popover.classList.remove('hidden');
+}
+
+function hideWaypointPopover() {
+  const popover = document.getElementById('waypointContextPopover');
+  if (popover) popover.classList.add('hidden');
+  activeWaypointContext = null;
+}
+
 function renderRoutesSvg() {
+  ensureSvgMarkers();
   let svgHtml = '';
 
   appState.routes.forEach(route => {
     if (!route.points || route.points.length < 2) return;
     const pathD = drawingTools.buildSmoothSvgPath(route.points);
     const color = route.color || '#DC2626';
+    const cleanColor = color.replace(/[^a-zA-Z0-9]/g, '');
     const width = route.strokeWidth || 4;
+    const isLarge = route.arrowSize === 'large';
+    const szPrefix = isLarge ? 'lg-' : '';
+
+    const hasEndArrow = route.arrowEnd !== false && route.arrowStyle !== 'none' && route.arrowStyle !== 'start';
+    const hasStartArrow = route.arrowStart === true || route.arrowStyle === 'start' || route.arrowStyle === 'both';
+
+    const endAttr = hasEndArrow ? `marker-end="url(#arrow-end-${szPrefix}${cleanColor})"` : '';
+    const startAttr = hasStartArrow ? `marker-start="url(#arrow-start-${szPrefix}${cleanColor})"` : '';
 
     svgHtml += `
-      <path d="${pathD}"
-        class="route-path"
-        data-route-id="${route.id}"
-        fill="none"
-        stroke="${color}"
-        stroke-width="${width}"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
+      <g class="route-group" data-route-id="${route.id}">
+        <path d="${pathD}"
+          class="route-path"
+          data-route-id="${route.id}"
+          fill="none"
+          stroke="${color}"
+          stroke-width="${width}"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ${endAttr}
+          ${startAttr}
+        />
     `;
+
+    // Render interactive waypoint handles for splitting and branching
+    route.points.forEach((pt, pIdx) => {
+      svgHtml += `
+        <circle cx="${pt.x}" cy="${pt.y}" r="4.5"
+          class="waypoint-handle"
+          data-route-id="${route.id}"
+          data-waypoint-idx="${pIdx}"
+          stroke="${color}"
+        />
+      `;
+    });
+
+    svgHtml += `</g>`;
   });
 
   svgRoutesLayer.innerHTML = svgHtml;
+
+  // Add click handlers on waypoint handles
+  svgRoutesLayer.querySelectorAll('.waypoint-handle').forEach(handle => {
+    handle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const rId = handle.getAttribute('data-route-id');
+      const wpIdx = parseInt(handle.getAttribute('data-waypoint-idx'), 10);
+      const route = appState.routes.find(r => r.id === rId);
+      if (route && route.points[wpIdx]) {
+        showWaypointPopover(route, wpIdx, route.points[wpIdx]);
+      }
+    });
+  });
 }
 
 function renderZonesSvg() {
@@ -650,37 +903,78 @@ function updateSidebarLists() {
     card.className = 'item-card';
     card.setAttribute('data-label-card-id', lbl.id);
 
+    const firstLine = (lbl.text || '').split('\n')[0] || 'Landmark Label';
+
     card.innerHTML = `
       <div class="item-card-header">
         <div class="item-badge-title">
           <span style="font-weight:700; color:#38BDF8;">🏷️</span>
-          <span class="item-card-title">${lbl.text}</span>
+          <span class="item-card-title">${firstLine}</span>
         </div>
         <div class="item-card-actions">
           <button class="icon-btn-subtle delete" title="Delete label">✕</button>
         </div>
       </div>
       <div class="form-group" style="margin-top:6px;">
-        <input type="text" class="form-input edit-label-text" value="${lbl.text}" placeholder="Label text">
+        <label style="font-size:0.7rem; color:#94A3B8;">Text (Press Enter for multi-line)</label>
+        <textarea class="form-textarea edit-label-text" rows="2" placeholder="Line 1&#10;Line 2">${lbl.text || ''}</textarea>
       </div>
-      <div class="item-card-footer">
+      <div class="form-row" style="display:flex; gap:6px; margin-top:6px;">
+        <div style="flex:1;">
+          <label style="font-size:0.68rem; color:#94A3B8; display:block;">Font</label>
+          <select class="form-select select-label-font form-select-xs" style="width:100%;">
+            <option value="Plus Jakarta Sans" ${lbl.fontFamily === 'Plus Jakarta Sans' ? 'selected' : ''}>Sans (Jakarta)</option>
+            <option value="Playfair Display" ${lbl.fontFamily === 'Playfair Display' ? 'selected' : ''}>Serif (Playfair)</option>
+            <option value="Space Mono" ${lbl.fontFamily === 'Space Mono' ? 'selected' : ''}>Mono (Space)</option>
+            <option value="Cinzel" ${lbl.fontFamily === 'Cinzel' ? 'selected' : ''}>Classical (Cinzel)</option>
+            <option value="Oswald" ${lbl.fontFamily === 'Oswald' ? 'selected' : ''}>Bold (Oswald)</option>
+          </select>
+        </div>
+        <div style="width:65px;">
+          <label style="font-size:0.68rem; color:#94A3B8; display:block;">Size</label>
+          <select class="form-select select-label-size form-select-xs" style="width:100%;">
+            <option value="9" ${lbl.fontSize == 9 ? 'selected' : ''}>9px</option>
+            <option value="11" ${!lbl.fontSize || lbl.fontSize == 11 ? 'selected' : ''}>11px</option>
+            <option value="13" ${lbl.fontSize == 13 ? 'selected' : ''}>13px</option>
+            <option value="16" ${lbl.fontSize == 16 ? 'selected' : ''}>16px</option>
+            <option value="20" ${lbl.fontSize == 20 ? 'selected' : ''}>20px</option>
+          </select>
+        </div>
+        <div style="width:90px;">
+          <label style="font-size:0.68rem; color:#94A3B8; display:block;">Style</label>
+          <select class="form-select select-label-style form-select-xs" style="width:100%;">
+            <option value="default" ${lbl.style === 'default' ? 'selected' : ''}>White</option>
+            <option value="dark-style" ${lbl.style === 'dark-style' ? 'selected' : ''}>Dark</option>
+            <option value="road-style" ${lbl.style === 'road-style' ? 'selected' : ''}>Road</option>
+            <option value="blueprint-style" ${lbl.style === 'blueprint-style' ? 'selected' : ''}>Blueprint</option>
+            <option value="minimal-style" ${lbl.style === 'minimal-style' ? 'selected' : ''}>Outline</option>
+          </select>
+        </div>
+      </div>
+      <div class="item-card-footer" style="margin-top:6px;">
         <span>📍 X: ${lbl.x}, Y: ${lbl.y}</span>
-        <select class="form-select select-label-style" style="width: auto; padding: 2px 6px;">
-          <option value="default" ${lbl.style === 'default' ? 'selected' : ''}>Standard White</option>
-          <option value="dark-style" ${lbl.style === 'dark-style' ? 'selected' : ''}>Dark Slate</option>
-          <option value="road-style" ${lbl.style === 'road-style' ? 'selected' : ''}>Road Amber</option>
-        </select>
       </div>
     `;
 
     card.addEventListener('click', (e) => {
-      if (e.target.closest('.delete') || e.target.closest('input') || e.target.closest('select')) return;
+      if (e.target.closest('.delete') || e.target.closest('input') || e.target.closest('textarea') || e.target.closest('select')) return;
       canvasEngine.panTo(lbl.x, lbl.y, 1.5, 450);
     });
 
     card.querySelector('.edit-label-text').addEventListener('input', (e) => {
       lbl.text = e.target.value;
-      card.querySelector('.item-card-title').textContent = lbl.text;
+      const fl = (lbl.text || '').split('\n')[0] || 'Landmark Label';
+      card.querySelector('.item-card-title').textContent = fl;
+      renderPermanentLabels();
+    });
+
+    card.querySelector('.select-label-font').addEventListener('change', (e) => {
+      lbl.fontFamily = e.target.value;
+      renderPermanentLabels();
+    });
+
+    card.querySelector('.select-label-size').addEventListener('change', (e) => {
+      lbl.fontSize = parseInt(e.target.value, 10) || 11;
       renderPermanentLabels();
     });
 
@@ -707,10 +1001,15 @@ function updateSidebarLists() {
     card.className = 'item-card';
     card.setAttribute('data-route-card-id', route.id);
 
+    const isEnd = route.arrowStyle === 'end' || (route.arrowEnd !== false && !route.arrowStyle);
+    const isBoth = route.arrowStyle === 'both';
+    const isStart = route.arrowStyle === 'start';
+    const isNone = route.arrowStyle === 'none' || route.arrowEnd === false;
+
     card.innerHTML = `
       <div class="item-card-header">
         <div class="item-badge-title">
-          <span style="color:${route.color || '#DC2626'}">━━</span>
+          <span style="color:${route.color || '#DC2626'}">━━▶</span>
           <span class="item-card-title">${route.title || `Route Corridor ${rIdx + 1}`}</span>
         </div>
         <div class="item-card-actions">
@@ -720,14 +1019,31 @@ function updateSidebarLists() {
       <div class="form-group" style="margin-top:6px;">
         <input type="text" class="form-input edit-route-title" value="${route.title || `Route Corridor ${rIdx + 1}`}">
       </div>
-      <div class="item-card-footer">
+      <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
+        <span style="font-size:0.72rem; color:#94A3B8;">Arrow:</span>
+        <select class="form-select select-route-arrow form-select-xs" style="flex:1;">
+          <option value="end" ${isEnd ? 'selected' : ''}>→ End Arrow</option>
+          <option value="both" ${isBoth ? 'selected' : ''}>↔ Both Ends</option>
+          <option value="start" ${isStart ? 'selected' : ''}>← Start Arrow</option>
+          <option value="none" ${isNone ? 'selected' : ''}>― No Arrow</option>
+        </select>
+        <select class="form-select select-route-arrow-size form-select-xs" style="width:75px;">
+          <option value="standard" ${route.arrowSize !== 'large' ? 'selected' : ''}>Normal</option>
+          <option value="large" ${route.arrowSize === 'large' ? 'selected' : ''}>Large</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <button class="mini-btn btn-split-route" style="flex:1; background:#1E293B; border-color:#475569;" title="Split this corridor into two segments at midpoint">✂ Split Path</button>
+        <button class="mini-btn btn-branch-route" style="flex:1; background:#1E293B; border-color:#475569;" title="Start a new branch fork from this corridor">⑂ Branch Path</button>
+      </div>
+      <div class="item-card-footer" style="margin-top:8px;">
         <span>Points: <strong>${route.points ? route.points.length : 0}</strong></span>
         <span>Duration: <input type="number" class="form-input edit-route-duration" style="width:50px; display:inline-block; padding:1px 4px; font-size:0.75rem;" step="0.5" min="1" max="10" value="${route.duration || 3}">s</span>
       </div>
     `;
 
     card.addEventListener('click', (e) => {
-      if (e.target.closest('.delete') || e.target.closest('input')) return;
+      if (e.target.closest('.delete') || e.target.closest('input') || e.target.closest('select') || e.target.closest('button')) return;
       if (route.points && route.points.length >= 2) {
         canvasEngine.fitBounds(route.points, 80, 500);
       }
@@ -738,6 +1054,29 @@ function updateSidebarLists() {
       card.querySelector('.item-card-title').textContent = route.title;
       animationEngine.compileSteps();
       renderTimelinePills();
+    });
+
+    card.querySelector('.select-route-arrow').addEventListener('change', (e) => {
+      const val = e.target.value;
+      route.arrowStyle = val;
+      route.arrowEnd = (val === 'end' || val === 'both');
+      route.arrowStart = (val === 'start' || val === 'both');
+      renderRoutesSvg();
+    });
+
+    card.querySelector('.select-route-arrow-size').addEventListener('change', (e) => {
+      route.arrowSize = e.target.value;
+      renderRoutesSvg();
+    });
+
+    card.querySelector('.btn-split-route').addEventListener('click', (e) => {
+      e.stopPropagation();
+      drawingTools.splitRoute(route.id);
+    });
+
+    card.querySelector('.btn-branch-route').addEventListener('click', (e) => {
+      e.stopPropagation();
+      drawingTools.branchRoute(route.id);
     });
 
     card.querySelector('.edit-route-duration').addEventListener('change', (e) => {

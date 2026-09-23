@@ -23,6 +23,7 @@ export class CanvasEngine {
     this.dragStartY = 0;
     this.initialPanX = 0;
     this.initialPanY = 0;
+    this.isSpacePressed = false;
 
     // Camera animation frame
     this.cameraAnimId = null;
@@ -51,32 +52,80 @@ export class CanvasEngine {
   initEvents() {
     this.pointerDownPos = null;
     this.hasMovedSignificantly = false;
+    this.isSpacePressed = false;
 
-    // Wheel zoom
+    // Prevent default context menu on canvas so right-click drag pan works smoothly
+    this.container.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+    });
+
+    // Spacebar Hand Pan shortcut (works anytime not actively typing in an input)
+    window.addEventListener('keydown', (e) => {
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
+      if (isTyping) return;
+
+      if (e.code === 'Space' && !this.isSpacePressed) {
+        this.isSpacePressed = true;
+        this.container.classList.add('grab');
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') {
+        this.isSpacePressed = false;
+        this.container.classList.remove('grab');
+        if (!this.isPanning) {
+          this.setMode(this.mode);
+        }
+      }
+    });
+
+    // Wheel zoom & pan
     this.container.addEventListener('wheel', (e) => {
       e.preventDefault();
       const rect = this.container.getBoundingClientRect();
       const cursorX = e.clientX - rect.left;
       const cursorY = e.clientY - rect.top;
 
-      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
-      this.zoomAt(cursorX, cursorY, zoomFactor);
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch zoom
+        const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+        this.zoomAt(cursorX, cursorY, zoomFactor);
+      } else if (Math.abs(e.deltaX) > 0 || e.shiftKey) {
+        // Trackpad horizontal scroll or Shift+wheel pan
+        this.panX -= (e.shiftKey ? e.deltaY : e.deltaX);
+        this.panY -= (e.shiftKey ? 0 : e.deltaY);
+        this.applyTransform();
+      } else {
+        // Standard wheel zoom
+        const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+        this.zoomAt(cursorX, cursorY, zoomFactor);
+      }
     }, { passive: false });
 
     // Pointer down for pan or drawing
     this.container.addEventListener('pointerdown', (e) => {
-      // Ignore if clicking on interactive controls (hud buttons, pins, etc.)
-      if (e.target.closest('.hud-controls') || e.target.closest('.instruction-pill')) return;
+      // Ignore if clicking on interactive controls (hud buttons, dialogs, popovers, etc.)
+      if (e.target.closest('.hud-controls') ||
+          e.target.closest('.instruction-pill') ||
+          e.target.closest('.waypoint-context-popover') ||
+          e.target.closest('.modal-backdrop') ||
+          e.target.closest('.callout-dialog')) {
+        return;
+      }
 
       this.pointerDownPos = { x: e.clientX, y: e.clientY };
       this.hasMovedSignificantly = false;
 
-      if (this.mode === 'pan' || e.button === 1 || e.button === 2 || e.shiftKey || e.spaceKey) {
+      this.dragStartX = e.clientX;
+      this.dragStartY = e.clientY;
+      this.initialPanX = this.panX;
+      this.initialPanY = this.panY;
+
+      // Middle click (1), Right click (2), Space pressed, or mode === 'pan' immediately begins panning
+      if (this.mode === 'pan' || e.button === 1 || e.button === 2 || this.isSpacePressed || e.shiftKey) {
         this.isPanning = true;
-        this.dragStartX = e.clientX;
-        this.dragStartY = e.clientY;
-        this.initialPanX = this.panX;
-        this.initialPanY = this.panY;
         this.container.classList.add('grabbing');
         try { this.container.setPointerCapture(e.pointerId); } catch (_) {}
       }
@@ -85,8 +134,15 @@ export class CanvasEngine {
     // Pointer move
     this.container.addEventListener('pointermove', (e) => {
       if (this.pointerDownPos) {
-        if (Math.hypot(e.clientX - this.pointerDownPos.x, e.clientY - this.pointerDownPos.y) > 6) {
+        const dist = Math.hypot(e.clientX - this.pointerDownPos.x, e.clientY - this.pointerDownPos.y);
+        if (dist > 5) {
           this.hasMovedSignificantly = true;
+          // In ALL modes (including route drawing 'path', 'zone', 'place', 'label', editing), dragging moves the map!
+          if (!this.isPanning) {
+            this.isPanning = true;
+            this.container.classList.add('grabbing');
+            try { this.container.setPointerCapture(e.pointerId); } catch (_) {}
+          }
         }
       }
 
@@ -105,23 +161,41 @@ export class CanvasEngine {
         this.isPanning = false;
         this.container.classList.remove('grabbing');
         try { this.container.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (this.isSpacePressed) {
+          this.container.classList.add('grab');
+        } else {
+          this.setMode(this.mode);
+        }
       }
     });
 
     // Canvas Click (for placing stops, drawing paths/zones)
     this.container.addEventListener('click', (e) => {
-      if (e.target.closest('.hud-controls') || e.target.closest('.instruction-pill')) return;
+      if (e.target.closest('.hud-controls') ||
+          e.target.closest('.instruction-pill') ||
+          e.target.closest('.waypoint-context-popover') ||
+          e.target.closest('.modal-backdrop') ||
+          e.target.closest('.callout-dialog')) {
+        return;
+      }
 
       // If user moved/dragged significantly, don't trigger click action
       if (this.hasMovedSignificantly) {
         this.hasMovedSignificantly = false;
+        this.pointerDownPos = null;
+        return;
+      }
+
+      // If Space is held, click does not place points (pan only)
+      if (this.isSpacePressed) {
+        this.pointerDownPos = null;
         return;
       }
 
       if (this.pointerDownPos) {
         const dist = Math.hypot(e.clientX - this.pointerDownPos.x, e.clientY - this.pointerDownPos.y);
         this.pointerDownPos = null;
-        if (dist > 6) return;
+        if (dist > 5) return;
       }
 
       const coords = this.screenToMap(e.clientX, e.clientY);
@@ -147,9 +221,13 @@ export class CanvasEngine {
 
   setMode(mode) {
     this.mode = mode;
-    this.container.classList.remove('crosshair', 'grabbing');
-    if (mode === 'place' || mode === 'label' || mode === 'path' || mode === 'zone') {
+    this.container.classList.remove('crosshair', 'grabbing', 'grab');
+    if (this.isSpacePressed) {
+      this.container.classList.add('grab');
+    } else if (mode === 'place' || mode === 'label' || mode === 'path' || mode === 'zone') {
       this.container.classList.add('crosshair');
+    } else {
+      this.container.classList.add('grab');
     }
   }
 

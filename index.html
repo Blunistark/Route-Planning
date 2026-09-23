@@ -9,7 +9,7 @@
   <meta property="og:description" content="Interactive Campus Route Planning and PPT On-Click Animation Studio">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Oswald:wght@500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./index.css">
 </head>
 <body>
@@ -123,9 +123,37 @@
           <div id="tabLabels" class="tab-pane">
             <div class="pane-header">
               <h3>Permanent Map Labels</h3>
-              <button id="btnAddLabelQuick" class="mini-btn">+ New Label</button>
+              <div style="display: flex; gap: 4px;">
+                <button id="btnBatchLabelsModal" class="mini-btn" style="background: #334155;" title="Add multiple landmark labels at once">+ Batch Multi</button>
+                <button id="btnAddLabelQuick" class="mini-btn">+ New Label</button>
+              </div>
             </div>
-            <p class="pane-help">Permanent text tags visible continuously on the map (roads, gates, surrounding facilities, athletic pitches).</p>
+            <p class="pane-help">Permanent text tags on the map. Supports multi-line labels and custom architectural typography.</p>
+            
+            <!-- Global Font Styling Quickbar -->
+            <div class="bulk-font-bar">
+              <div class="bulk-font-title">
+                <span>Bulk Typography & Style:</span>
+              </div>
+              <div class="bulk-font-controls">
+                <select id="bulkFontFamily" class="form-select form-select-xs" title="Font family">
+                  <option value="Plus Jakarta Sans">Modern Sans (Plus Jakarta)</option>
+                  <option value="Playfair Display">Architectural Serif (Playfair)</option>
+                  <option value="Space Mono">Technical CAD (Space Mono)</option>
+                  <option value="Cinzel">Classical Formal (Cinzel)</option>
+                  <option value="Oswald">Executive Bold (Oswald)</option>
+                </select>
+                <select id="bulkFontSize" class="form-select form-select-xs" title="Font size" style="width: 70px;">
+                  <option value="9">9px</option>
+                  <option value="11" selected>11px</option>
+                  <option value="13">13px</option>
+                  <option value="16">16px</option>
+                  <option value="20">20px</option>
+                </select>
+                <button id="btnApplyBulkFont" class="btn-xs-primary" title="Apply this font & size to all labels on map">Apply All</button>
+              </div>
+            </div>
+
             <div id="labelsList" class="items-list">
               <!-- Dynamically populated -->
             </div>
@@ -137,7 +165,7 @@
               <h3>Route Corridors</h3>
               <button id="btnDrawRouteQuick" class="mini-btn">+ Draw Route</button>
             </div>
-            <p class="pane-help">Planned pathways linking stops. Each corridor draws cleanly during the on-click presentation sequence.</p>
+            <p class="pane-help">Planned corridors with directional arrowheads. You can split any route at a waypoint or branch new corridors from existing paths.</p>
             <div id="routesList" class="items-list">
               <!-- Dynamically populated -->
             </div>
@@ -260,6 +288,25 @@
                 </div>
               </div>
               <div class="callout-pointer-arrow"></div>
+            </div>
+
+            <!-- Waypoint Context Popover (For Splitting and Branching Paths) -->
+            <div id="waypointContextPopover" class="waypoint-context-popover hidden">
+              <div class="popover-header">
+                <span id="waypointPopoverTitle">Path Waypoint</span>
+                <button id="btnCloseWaypointPopover" class="popover-close-btn">✕</button>
+              </div>
+              <div class="popover-body">
+                <button id="btnPopoverSplitRoute" class="popover-action-btn">
+                  <span class="popover-action-title">✂ Split Path Here</span>
+                  <span class="popover-action-desc">Divides corridor into two separate connected routes</span>
+                </button>
+                <button id="btnPopoverBranchRoute" class="popover-action-btn">
+                  <span class="popover-action-title">⑂ Branch Path From Here</span>
+                  <span class="popover-action-desc">Starts a new corridor fork branching off this point</span>
+                </button>
+              </div>
+              <div class="popover-pointer-arrow"></div>
             </div>
           </div>
         </div>
@@ -416,6 +463,59 @@
               <span id="recordingStatusTitle" style="font-weight: 700; color: #fff;">Recording presentation frames...</span>
               <p id="recordingStatusSubtitle" style="font-size: 0.75rem; color: #94A3B8; margin: 0;"></p>
             </div>
+          </div>
+        </div>
+      </div>
+    <!-- Batch Multi-Labels Modal -->
+    <div id="batchLabelsModal" class="modal-backdrop hidden">
+      <div class="modal-card" style="max-width: 520px;">
+        <div class="modal-header">
+          <div>
+            <h3>Batch Add Multi-Line Labels</h3>
+            <p>Paste multiple landmarks at once. Multi-line labels supported inside each block!</p>
+          </div>
+          <button id="btnCloseBatchLabelsModal" class="modal-close-btn">✕</button>
+        </div>
+        <div class="modal-content" style="padding: 18px;">
+          <div class="form-group">
+            <label>Label Text Entries</label>
+            <textarea id="batchLabelsInput" class="form-textarea" rows="7" placeholder="Main Campus Gate&#10;Welcome Center&#10;&#10;Science Complex&#10;Block B • Chemistry Lab&#10;&#10;Athletic Stadium&#10;Football Pitch & Track"></textarea>
+            <small style="color: #94A3B8; font-size: 0.72rem; margin-top: 4px; display: block;">Separate labels with a blank line. Within each block, multiple lines are preserved!</small>
+          </div>
+          <div class="form-row" style="display: flex; gap: 8px; margin-top: 10px;">
+            <div class="form-group" style="flex: 1;">
+              <label>Font Family</label>
+              <select id="batchFontFamily" class="form-select">
+                <option value="Plus Jakarta Sans">Modern Sans (Plus Jakarta)</option>
+                <option value="Playfair Display">Architectural Serif (Playfair)</option>
+                <option value="Space Mono">Technical CAD (Space Mono)</option>
+                <option value="Cinzel">Classical Formal (Cinzel)</option>
+                <option value="Oswald">Executive Bold (Oswald)</option>
+              </select>
+            </div>
+            <div class="form-group" style="width: 90px;">
+              <label>Size</label>
+              <select id="batchFontSize" class="form-select">
+                <option value="9">9px</option>
+                <option value="11" selected>11px</option>
+                <option value="13">13px</option>
+                <option value="16">16px</option>
+                <option value="20">20px</option>
+              </select>
+            </div>
+            <div class="form-group" style="width: 120px;">
+              <label>Style</label>
+              <select id="batchStylePreset" class="form-select">
+                <option value="default">Standard White</option>
+                <option value="dark-style">Dark Slate</option>
+                <option value="road-style">Road Amber</option>
+                <option value="blueprint-style">Blueprint Cyan</option>
+              </select>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+            <button id="btnCancelBatchLabels" class="btn-secondary-sm">Cancel</button>
+            <button id="btnConfirmBatchLabels" class="btn-primary-sm" style="background: var(--color-formal-blue); color: #fff; padding: 6px 14px; border-radius: 4px; font-weight: 600; border: none; cursor: pointer;">Add Labels to Map</button>
           </div>
         </div>
       </div>

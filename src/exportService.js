@@ -260,16 +260,51 @@ export class ExportService {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.stroke();
+
+        // Draw Arrowhead at End
+        if (route.arrowEnd !== false && maxIndex >= 2) {
+          const pEnd = toScreen(route.points[maxIndex - 1]);
+          const pPrev = toScreen(route.points[maxIndex - 2]);
+          const angle = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
+          const arrowLen = 10 * scale * 1.4;
+          const arrowWid = 6 * scale * 1.4;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(pEnd.x, pEnd.y);
+          ctx.lineTo(
+            pEnd.x - arrowLen * Math.cos(angle) + arrowWid * Math.sin(angle),
+            pEnd.y - arrowLen * Math.sin(angle) - arrowWid * Math.cos(angle)
+          );
+          ctx.lineTo(
+            pEnd.x - arrowLen * Math.cos(angle) - arrowWid * Math.sin(angle),
+            pEnd.y - arrowLen * Math.sin(angle) + arrowWid * Math.cos(angle)
+          );
+          ctx.closePath();
+          ctx.fillStyle = route.color || '#DC2626';
+          ctx.fill();
+          ctx.restore();
+        }
       });
 
       // 3. Draw Permanent Labels
       if (this.state.permanentLabels && this.state.showPermanentLabels !== false) {
         this.state.permanentLabels.forEach(lbl => {
           const pt = toScreen({ x: lbl.x, y: lbl.y });
-          ctx.font = 'bold 11px Segoe UI, sans-serif';
-          const textW = ctx.measureText(lbl.text).width;
-          const boxH = 18;
-          const boxW = textW + 12;
+          const fontName = lbl.fontFamily || 'Segoe UI';
+          const fontSize = Math.max(9, Math.round((lbl.fontSize || 11) * scale * 1.1));
+          ctx.font = `bold ${fontSize}px ${fontName}, sans-serif`;
+
+          const lines = String(lbl.text || '').split('\n');
+          let maxLineW = 0;
+          lines.forEach(l => {
+            const w = ctx.measureText(l).width;
+            if (w > maxLineW) maxLineW = w;
+          });
+
+          const lineH = fontSize * 1.35;
+          const boxH = lines.length * lineH + 8;
+          const boxW = maxLineW + 14;
 
           ctx.save();
           if (lbl.style === 'road-style') {
@@ -278,6 +313,9 @@ export class ExportService {
           } else if (lbl.style === 'dark-style') {
             ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
             ctx.strokeStyle = '#64748B';
+          } else if (lbl.style === 'blueprint-style') {
+            ctx.fillStyle = '#0C2340';
+            ctx.strokeStyle = '#0284C7';
           } else {
             ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
             ctx.strokeStyle = '#334155';
@@ -287,10 +325,19 @@ export class ExportService {
           ctx.lineWidth = 1;
           ctx.strokeRect(pt.x - boxW / 2, pt.y - boxH / 2, boxW, boxH);
 
-          ctx.fillStyle = (lbl.style === 'dark-style') ? '#FFFFFF' : ((lbl.style === 'road-style') ? '#78350F' : '#0F172A');
+          if (lbl.style === 'dark-style') ctx.fillStyle = '#FFFFFF';
+          else if (lbl.style === 'road-style') ctx.fillStyle = '#78350F';
+          else if (lbl.style === 'blueprint-style') ctx.fillStyle = '#38BDF8';
+          else ctx.fillStyle = '#0F172A';
+
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(lbl.text, pt.x, pt.y);
+
+          const startY = pt.y - ((lines.length - 1) * lineH) / 2;
+          lines.forEach((lineText, lIdx) => {
+            ctx.fillText(lineText, pt.x, startY + lIdx * lineH);
+          });
+
           ctx.restore();
         });
       }

@@ -64,52 +64,66 @@ export const sampleCampusPlan = {
   permanentLabels: [
     {
       id: 'label-1',
-      text: 'To Rajankunte Road ➔',
+      text: 'To Rajankunte Road\nNorth Arterial Way',
       x: 660,
       y: 120,
+      fontFamily: 'Space Mono',
+      fontSize: 10,
       style: 'road-style'
     },
     {
       id: 'label-2',
-      text: '➔ To Dibburu Village',
+      text: 'To Dibburu Village\nSecondary Route',
       x: 440,
       y: 345,
+      fontFamily: 'Space Mono',
+      fontSize: 10,
       style: 'road-style'
     },
     {
       id: 'label-3',
-      text: 'Regulation Football Pitch',
+      text: 'Regulation Football Pitch\nFIFA Standard 105x68m',
       x: 160,
       y: 720,
+      fontFamily: 'Plus Jakarta Sans',
+      fontSize: 11,
       style: 'default'
     },
     {
       id: 'label-4',
-      text: 'Championship Tennis Courts',
+      text: 'Championship Tennis Courts\nDual Surface Courts',
       x: 385,
       y: 645,
+      fontFamily: 'Plus Jakarta Sans',
+      fontSize: 11,
       style: 'default'
     },
     {
       id: 'label-5',
-      text: 'Open Air Amphitheatre',
+      text: 'Open Air Amphitheatre\n1,200 Seating Bowl',
       x: 630,
       y: 915,
+      fontFamily: 'Playfair Display',
+      fontSize: 12,
       style: 'default'
     },
     {
       id: 'label-6',
-      text: 'Main Vehicular Access Spine',
+      text: 'Main Vehicular Access Spine\n4-Lane Boulevard',
       x: 685,
       y: 480,
+      fontFamily: 'Oswald',
+      fontSize: 11,
       style: 'dark-style'
     },
     {
       id: 'label-7',
-      text: 'South Arrival & Parking',
+      text: 'South Arrival & Parking\nGate 1 • 450 Bays',
       x: 680,
       y: 1395,
-      style: 'dark-style'
+      fontFamily: 'Plus Jakarta Sans',
+      fontSize: 11,
+      style: 'blueprint-style'
     }
   ],
 
@@ -125,6 +139,9 @@ export const sampleCampusPlan = {
       style: 'formal',
       avatar: 'dot',
       duration: 2.8,
+      arrowEnd: true,
+      arrowStyle: 'end',
+      arrowSize: 'standard',
       points: [
         { x: 522, y: 1029 },
         { x: 524, y: 960 },
@@ -143,6 +160,9 @@ export const sampleCampusPlan = {
       style: 'formal',
       avatar: 'dot',
       duration: 2.4,
+      arrowEnd: true,
+      arrowStyle: 'end',
+      arrowSize: 'standard',
       points: [
         { x: 572, y: 820 },
         { x: 590, y: 770 },
@@ -160,6 +180,9 @@ export const sampleCampusPlan = {
       style: 'formal',
       avatar: 'dot',
       duration: 3.8,
+      arrowEnd: true,
+      arrowStyle: 'end',
+      arrowSize: 'standard',
       points: [
         { x: 615, y: 673 },
         { x: 540, y: 695 },

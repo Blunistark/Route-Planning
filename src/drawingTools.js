@@ -1,4 +1,4 @@
-// Drawing Tools: Places, Permanent Labels, Routes, and Zone Boundaries
+// Drawing Tools: Places, Permanent Labels, Routes (with Split & Branching & Arrowheads), and Zone Boundaries
 
 export class DrawingTools {
   constructor(canvasEngine, appState, onUpdateCallback) {
@@ -10,9 +10,11 @@ export class DrawingTools {
     this.isDrawing = false;
     this.drawingType = null; // 'path' or 'zone'
     this.activePoints = [];
+    this.branchSourceTitle = null;
 
     // Dragging state
     this.draggingLabel = null;
+    this.draggingStop = null;
 
     // Callbacks to notify UI when tool mode completes
     this.onFinishMode = null;
@@ -57,8 +59,13 @@ export class DrawingTools {
       }
     });
 
-    // Pointer move listener for route preview or dragging permanent label
+    // Pointer move listener for route preview or dragging items
     this.engine.container.addEventListener('pointermove', (e) => {
+      // If canvas is actively panning, do not distort drawing preview or drag elements
+      if (this.engine.isPanning) {
+        return;
+      }
+
       if (this.isDrawing && this.activePoints.length > 0) {
         const coords = this.engine.screenToMap(e.clientX, e.clientY);
         this.renderDrawingPreview(coords);
@@ -66,20 +73,47 @@ export class DrawingTools {
         const coords = this.engine.screenToMap(e.clientX, e.clientY);
         const label = this.state.permanentLabels?.find(l => l.id === this.draggingLabel);
         if (label) {
-          label.x = coords.x;
-          label.y = coords.y;
+          label.x = Math.round(coords.x);
+          label.y = Math.round(coords.y);
           const el = document.querySelector(`[data-label-id="${label.id}"]`);
           if (el) {
-            el.style.left = `${coords.x}px`;
-            el.style.top = `${coords.y}px`;
+            el.style.left = `${label.x}px`;
+            el.style.top = `${label.y}px`;
+          }
+        }
+      } else if (this.draggingStop) {
+        const coords = this.engine.screenToMap(e.clientX, e.clientY);
+        const stop = this.state.stops?.find(s => s.id === this.draggingStop);
+        if (stop) {
+          stop.x = Math.round(coords.x);
+          stop.y = Math.round(coords.y);
+          const pin = document.querySelector(`.map-pin[data-stop-id="${stop.id}"]`);
+          if (pin) {
+            pin.style.left = `${stop.x}px`;
+            pin.style.top = `${stop.y}px`;
+          }
+          // Update connected routes
+          this.state.routes?.forEach(r => {
+            if (r.fromStopId === stop.id && r.points?.length > 0) {
+              r.points[0] = { x: stop.x, y: stop.y };
+            }
+            if (r.toStopId === stop.id && r.points?.length > 0) {
+              r.points[r.points.length - 1] = { x: stop.x, y: stop.y };
+            }
+          });
+          const svgRoutesLayer = document.getElementById('svgRoutesLayer');
+          if (svgRoutesLayer) {
+            // Re-render routes live while dragging stop
+            this.onUpdate();
           }
         }
       }
     });
 
     window.addEventListener('pointerup', () => {
-      if (this.draggingLabel) {
+      if (this.draggingLabel || this.draggingStop) {
         this.draggingLabel = null;
+        this.draggingStop = null;
         this.onUpdate();
       }
     });
@@ -132,6 +166,9 @@ export class DrawingTools {
         style: 'formal',
         avatar: 'dot',
         duration: 2.8,
+        arrowEnd: true,
+        arrowStart: false,
+        arrowSize: 'standard',
         points: [
           { x: prevStop.x, y: prevStop.y },
           { x: coords.x, y: coords.y }
@@ -169,7 +206,9 @@ export class DrawingTools {
       text: `Landmark ${nextCount}`,
       x: coords.x,
       y: coords.y,
-      style: 'default' // 'default', 'dark-style', 'road-style'
+      fontFamily: 'Plus Jakarta Sans',
+      fontSize: 11,
+      style: 'default' // 'default', 'dark-style', 'road-style', 'blueprint-style', 'minimal-style'
     };
 
     this.state.permanentLabels.push(newLabel);
@@ -197,11 +236,18 @@ export class DrawingTools {
   }
 
   // --- Route Path Drawing ---
-  startPathDrawing() {
+  startPathDrawing(initialPoints = [], sourceTitle = null) {
     this.isDrawing = true;
     this.drawingType = 'path';
-    this.activePoints = [];
-    this.showInstruction('Click map to place route waypoints. Double-click or press ✓ Done to complete.');
+    this.activePoints = initialPoints ? [...initialPoints] : [];
+    this.branchSourceTitle = sourceTitle;
+
+    if (this.activePoints.length > 0) {
+      this.showInstruction(`Branching from "${sourceTitle || 'Corridor'}". Click map to place next waypoints. Press ✓ Done when finished.`);
+      this.renderDrawingPreview();
+    } else {
+      this.showInstruction('Click map to place route waypoints. Double-click or press ✓ Done to complete.');
+    }
   }
 
   handlePathClick(coords) {
@@ -220,8 +266,102 @@ export class DrawingTools {
     this.activePoints.push({ x: coords.x, y: coords.y });
     this.renderDrawingPreview();
 
-    // Update instruction with point count
-    this.showInstruction(`Route points: ${this.activePoints.length}. Click next waypoint or press ✓ Done when finished.`);
+    const prefix = this.branchSourceTitle ? `Branching (${this.branchSourceTitle}):` : 'Route points:';
+    this.showInstruction(`${prefix} ${this.activePoints.length} points. Click next waypoint or press ✓ Done when finished.`);
+  }
+
+  // --- Split Route At Waypoint or Midpoint ---
+  splitRoute(routeId, waypointIndex = null) {
+    const routeIndex = this.state.routes.findIndex(r => r.id === routeId);
+    if (routeIndex === -1) return null;
+
+    const original = this.state.routes[routeIndex];
+    if (!original.points || original.points.length < 2) return null;
+
+    let part1Points = [];
+    let part2Points = [];
+
+    if (original.points.length === 2) {
+      // Create a midpoint to split into two segments
+      const p0 = original.points[0];
+      const p1 = original.points[1];
+      const mid = {
+        x: Math.round((p0.x + p1.x) / 2),
+        y: Math.round((p0.y + p1.y) / 2)
+      };
+      part1Points = [p0, mid];
+      part2Points = [mid, p1];
+    } else {
+      let splitIdx = waypointIndex;
+      if (splitIdx === null || splitIdx === undefined || splitIdx <= 0 || splitIdx >= original.points.length - 1) {
+        splitIdx = Math.floor(original.points.length / 2);
+      }
+      part1Points = original.points.slice(0, splitIdx + 1);
+      part2Points = original.points.slice(splitIdx);
+    }
+
+    const dur = original.duration || 3.0;
+    const dur1 = Math.max(1.4, Math.round(dur * 0.5 * 10) / 10);
+    const dur2 = Math.max(1.4, Math.round(dur * 0.5 * 10) / 10);
+
+    const part1 = {
+      ...original,
+      id: `route-${Date.now()}-1`,
+      title: `${original.title || 'Corridor'} (Leg 1)`,
+      toStopId: null,
+      arrowEnd: false, // arrow continues on second leg
+      arrowStart: original.arrowStart || false,
+      arrowSize: original.arrowSize || 'standard',
+      duration: dur1,
+      points: part1Points
+    };
+
+    const part2 = {
+      ...original,
+      id: `route-${Date.now()}-2`,
+      title: `${original.title || 'Corridor'} (Leg 2)`,
+      fromStopId: null,
+      arrowEnd: original.arrowEnd !== false,
+      arrowStart: false,
+      arrowSize: original.arrowSize || 'standard',
+      duration: dur2,
+      points: part2Points
+    };
+
+    // Replace original route with the two split legs
+    this.state.routes.splice(routeIndex, 1, part1, part2);
+    this.onUpdate();
+
+    // Select the routes tab
+    const tabRoutes = document.querySelector('.tab-btn[data-tab="routes"]');
+    if (tabRoutes) tabRoutes.click();
+
+    return [part1, part2];
+  }
+
+  // --- Branch a New Route from an Existing Route Waypoint ---
+  branchRoute(routeId, waypointIndex = null) {
+    const route = this.state.routes.find(r => r.id === routeId);
+    if (!route || !route.points || route.points.length === 0) return;
+
+    let branchPoint = null;
+    if (waypointIndex !== null && waypointIndex !== undefined && route.points[waypointIndex]) {
+      branchPoint = route.points[waypointIndex];
+    } else {
+      // Default to midpoint or last point
+      const midIdx = Math.floor(route.points.length / 2);
+      branchPoint = route.points[midIdx] || route.points[0];
+    }
+
+    // Activate Route tool mode and start drawing from the branch point
+    this.engine.setMode('path');
+    const toolPathBtn = document.getElementById('toolPath');
+    if (toolPathBtn) {
+      document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+      toolPathBtn.classList.add('active');
+    }
+
+    this.startPathDrawing([{ x: branchPoint.x, y: branchPoint.y }], route.title || 'Corridor');
   }
 
   // --- Zone Boundary Drawing ---
@@ -270,6 +410,20 @@ export class DrawingTools {
     } else {
       const pathD = this.buildSmoothSvgPath(pts);
       svgHtml += `<path d="${pathD}" fill="none" stroke="${strokeColor}" stroke-width="3.5" stroke-dasharray="6,4" />`;
+
+      // Directional arrow head at current end
+      if (pts.length >= 2) {
+        const pEnd = pts[pts.length - 1];
+        const pPrev = pts[pts.length - 2];
+        const angle = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
+        const arrowLength = 12;
+        const arrowWidth = 7;
+        const leftX = pEnd.x - arrowLength * Math.cos(angle) + arrowWidth * Math.sin(angle);
+        const leftY = pEnd.y - arrowLength * Math.sin(angle) - arrowWidth * Math.cos(angle);
+        const rightX = pEnd.x - arrowLength * Math.cos(angle) - arrowWidth * Math.sin(angle);
+        const rightY = pEnd.y - arrowLength * Math.sin(angle) + arrowWidth * Math.cos(angle);
+        svgHtml += `<polygon points="${pEnd.x},${pEnd.y} ${leftX},${leftY} ${rightX},${rightY}" fill="${strokeColor}" />`;
+      }
     }
 
     pts.forEach((p) => {
@@ -299,16 +453,23 @@ export class DrawingTools {
       }
 
       const routeNum = this.state.routes.length + 1;
+      const title = this.branchSourceTitle
+        ? `Branch of ${this.branchSourceTitle}`
+        : `Route Corridor ${routeNum}`;
+
       const newRoute = {
         id: `route-${Date.now()}`,
         fromStopId: fromStopId,
         toStopId: toStopId,
-        title: `Route Corridor ${routeNum}`,
+        title: title,
         color: '#DC2626',
         strokeWidth: 4,
         style: 'formal',
         avatar: 'dot',
         duration: 3.0,
+        arrowEnd: true,
+        arrowStart: false,
+        arrowSize: 'standard',
         points: [...this.activePoints]
       };
       this.state.routes.push(newRoute);
@@ -334,6 +495,7 @@ export class DrawingTools {
     this.isDrawing = false;
     this.drawingType = null;
     this.activePoints = [];
+    this.branchSourceTitle = null;
     this.activePathLayer.innerHTML = '';
     this.hideInstruction();
 
@@ -348,6 +510,7 @@ export class DrawingTools {
     this.isDrawing = false;
     this.drawingType = null;
     this.activePoints = [];
+    this.branchSourceTitle = null;
     this.activePathLayer.innerHTML = '';
     this.hideInstruction();
 
@@ -368,24 +531,6 @@ export class DrawingTools {
   buildSmoothSvgPath(points) {
     if (!points || points.length === 0) return '';
     if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
-    if (points.length === 2) {
-      return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
-    }
-
-    let d = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = i > 0 ? points[i - 1] : points[i];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = i < points.length - 2 ? points[i + 2] : p2;
-
-      const cp1x = p1.x + (p2.x - p0.x) / 6;
-      const cp1y = p1.y + (p2.y - p0.y) / 6;
-      const cp2x = p2.x - (p3.x - p1.x) / 6;
-      const cp2y = p2.y - (p3.y - p1.y) / 6;
-
-      d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
-    }
-    return d;
+    return points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
   }
 }
