@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RouteCraft Studio — Campus Route Planning & Presentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./index.css">
+</head>
+<body>
+  <div id="app" class="app-layout">
+    <!-- Top Header Navigation Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="18" r="3"></circle>
+              <circle cx="18" cy="6" r="3"></circle>
+              <path d="M8.6 16.4l6.8-6.8"></path>
+            </svg>
+          </div>
+          <span class="brand-title">RouteCraft Studio</span>
+          <span class="brand-badge">FORMAL</span>
+        </div>
+
+        <div class="project-info">
+          <input type="text" id="projectTitle" class="project-title-input" value="Campus Master Plan Presentation" title="Edit presentation title">
+        </div>
+      </div>
+
+      <!-- Center Tool Selector -->
+      <div class="header-center">
+        <div class="mode-pill">
+          <button id="toolPan" class="tool-btn active" title="Pan Map View (V)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 11V6a2 2 0 0 0-4 0v5"></path><path d="M14 10V4a2 2 0 0 0-4 0v6"></path><path d="M10 10.5V6a2 2 0 0 0-4 0v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+            <span>Pan</span>
+          </button>
+          <button id="toolPlace" class="tool-btn" title="Add Tour Stop (P)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+            <span>Add Stop</span>
+          </button>
+          <button id="toolLabel" class="tool-btn" title="Add Permanent Map Label (L)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"></path></svg>
+            <span>Add Label</span>
+          </button>
+          <button id="toolPath" class="tool-btn" title="Draw Route Corridor (R)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 17 6-6 4 4 8-8"></path><path d="M14 7h7v7"></path></svg>
+            <span>Draw Route</span>
+          </button>
+          <button id="toolZone" class="tool-btn" title="Highlight Area / Boundary (Z)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            <span>Highlight Zone</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="header-right">
+        <button id="btnSampleTour" class="action-btn secondary" title="Reset to Campus Master Plan Template">
+          <span>Campus Plan</span>
+        </button>
+
+        <button id="btnExportPptx" class="action-btn accent-pptx" title="Export as PowerPoint (.pptx) with On-Click steps">
+          <span>Export PPTX</span>
+        </button>
+
+        <button id="btnRecordVideo" class="action-btn secondary" title="Record Video for PPT">
+          <span>Record Video</span>
+        </button>
+
+        <button id="btnPresent" class="action-btn primary" title="Start PPT-Style Click Presentation (F5)">
+          <span>▶ Present (PPT Mode)</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace Body -->
+    <div class="app-body">
+      <!-- Left Sidebar: Controls & Steps -->
+      <aside class="sidebar-panel">
+        <div class="sidebar-tabs">
+          <button class="tab-btn active" data-tab="stops">
+            <span>Stops</span>
+            <span id="badgeStopsCount" class="tab-counter">0</span>
+          </button>
+          <button class="tab-btn" data-tab="labels">
+            <span>Labels</span>
+            <span id="badgeLabelsCount" class="tab-counter">0</span>
+          </button>
+          <button class="tab-btn" data-tab="routes">
+            <span>Routes</span>
+            <span id="badgeRoutesCount" class="tab-counter">0</span>
+          </button>
+          <button class="tab-btn" data-tab="zones">
+            <span>Zones</span>
+            <span id="badgeZonesCount" class="tab-counter">0</span>
+          </button>
+          <button class="tab-btn" data-tab="settings">
+            <span>Settings</span>
+          </button>
+        </div>
+
+        <div class="sidebar-content">
+          <!-- Stops Tab -->
+          <div id="tabStops" class="tab-pane active">
+            <div class="pane-header">
+              <h3>Presentation Stops</h3>
+              <button id="btnAddStopQuick" class="mini-btn">+ Add Stop</button>
+            </div>
+            <p class="pane-help">Sequential presentation milestones. Clicking a stop focuses the camera and displays its formal dialog box.</p>
+            <div id="stopsList" class="items-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Permanent Labels Tab -->
+          <div id="tabLabels" class="tab-pane">
+            <div class="pane-header">
+              <h3>Permanent Map Labels</h3>
+              <button id="btnAddLabelQuick" class="mini-btn">+ New Label</button>
+            </div>
+            <p class="pane-help">Permanent text tags visible continuously on the map (roads, gates, surrounding facilities, athletic pitches).</p>
+            <div id="labelsList" class="items-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Routes Tab -->
+          <div id="tabRoutes" class="tab-pane">
+            <div class="pane-header">
+              <h3>Route Corridors</h3>
+              <button id="btnDrawRouteQuick" class="mini-btn">+ Draw Route</button>
+            </div>
+            <p class="pane-help">Planned pathways linking stops. Each corridor draws cleanly during the on-click presentation sequence.</p>
+            <div id="routesList" class="items-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Highlights Tab -->
+          <div id="tabZones" class="tab-pane">
+            <div class="pane-header">
+              <h3>Highlighted Boundaries</h3>
+              <button id="btnDrawZoneQuick" class="mini-btn">+ New Zone</button>
+            </div>
+            <p class="pane-help">Outlines surrounding key facilities (e.g. sports ground 7, engineering wing 5).</p>
+            <div id="zonesList" class="items-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Settings Tab -->
+          <div id="tabSettings" class="tab-pane">
+            <div class="pane-header">
+              <h3>Presentation Options</h3>
+            </div>
+
+            <div class="form-group">
+              <label>Focus Dialog Box Behavior</label>
+              <div class="form-checkbox-row">
+                <input type="checkbox" id="chkShowDialogOnFocus" checked>
+                <label for="chkShowDialogOnFocus">Show callout dialog box on zoom-in / focus</label>
+              </div>
+              <div class="form-checkbox-row">
+                <input type="checkbox" id="chkPermanentLabelsVisible" checked>
+                <label for="chkPermanentLabelsVisible">Display permanent map labels during presentation</label>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Map Source Layer</label>
+              <select id="mapSourceSelect" class="form-select">
+                <option value="campus_plan" selected>Campus Site Plan (image.png)</option>
+                <option value="custom_upload">Upload Custom Master Plan Image</option>
+              </select>
+            </div>
+
+            <div id="uploadContainer" class="form-group hidden">
+              <label>Select Plan File</label>
+              <input type="file" id="fileInput" accept="image/*" class="form-input">
+            </div>
+
+            <div class="form-group">
+              <label>Presentation File Backup</label>
+              <div class="btn-group-row">
+                <button id="btnExportJson" class="btn-secondary-sm">Save JSON</button>
+                <button id="btnImportJson" class="btn-secondary-sm">Load JSON</button>
+                <input type="file" id="jsonFileInput" accept=".json" class="hidden">
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center Map / Canvas Viewport -->
+      <main class="canvas-container" id="canvasContainer">
+        <!-- Floating Canvas HUD Bar -->
+        <div class="canvas-hud">
+          <div id="drawingInstruction" class="instruction-pill hidden">
+            <span id="instructionText">Click on map</span>
+            <button id="btnCancelDrawing" class="instruction-cancel" title="Cancel (Esc)">✕</button>
+            <button id="btnFinishDrawing" class="instruction-finish" title="Complete (Enter)">✓ Done</button>
+          </div>
+
+          <div class="hud-controls">
+            <button id="btnZoomIn" class="hud-btn" title="Zoom In (+)">+</button>
+            <button id="btnZoomOut" class="hud-btn" title="Zoom Out (-)">−</button>
+            <button id="btnFitView" class="hud-btn" title="Fit to Screen (F)">Fit</button>
+            <button id="btnResetView" class="hud-btn" title="Reset 100%">1:1</button>
+            <span id="zoomLevelDisplay" class="zoom-pill">100%</span>
+          </div>
+        </div>
+
+        <!-- The Interactive Map Stage -->
+        <div id="stageViewport" class="stage-viewport">
+          <div id="stageContent" class="stage-content">
+            <!-- Background Image Map -->
+            <img id="mapImage" class="map-bg-image" src="./image.png" alt="Campus Master Plan" draggable="false">
+
+            <!-- SVG Vector Layer for Paths, Highlights, and Moving Traveler -->
+            <svg id="stageSvg" class="stage-svg" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <marker id="arrowHead" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
+                  <polygon points="0 0.5, 5 3, 0 5.5" fill="#DC2626"></polygon>
+                </marker>
+              </defs>
+
+              <g id="svgZonesLayer"></g>
+              <g id="svgRoutesLayer"></g>
+              <g id="svgActivePathLayer"></g>
+              <g id="svgTravelerLayer"></g>
+            </svg>
+
+            <!-- Permanent Map Labels Layer -->
+            <div id="stagePermanentLabelsLayer" class="stage-permanent-labels-layer"></div>
+
+            <!-- HTML Pins Layer -->
+            <div id="stagePinsLayer" class="stage-pins-layer"></div>
+
+            <!-- FORMAL CALLOUT DIALOG BOX (Anchors to active place on zoom-in / focus) -->
+            <div id="formalCalloutDialog" class="formal-callout-dialog hidden">
+              <div class="callout-header">
+                <div class="callout-header-title">
+                  <div id="calloutBadgeNum" class="callout-badge-circle">1</div>
+                  <span id="calloutTitle">Main Administration (1)</span>
+                </div>
+                <button id="btnCloseCallout" class="callout-close-btn" title="Close dialog">✕</button>
+              </div>
+              <div class="callout-body">
+                <p id="calloutDesc" class="callout-desc">Primary administrative entrance and arrival zone.</p>
+                <div class="callout-meta-row">
+                  <span id="calloutTag1" class="callout-tag">Arrival Hub</span>
+                  <span id="calloutTag2" class="callout-tag">Phase 1 Complete</span>
+                </div>
+              </div>
+              <div class="callout-pointer-arrow"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Timeline & Presentation Control Bar -->
+        <div class="bottom-playback-bar">
+          <div class="playback-controls">
+            <button id="btnPrevStep" class="playback-btn" title="Previous Slide (Left Arrow)">◀</button>
+            <button id="btnPlayPause" class="playback-btn play-active" title="Play / Pause (Space)">
+              <span id="iconPlay">▶</span>
+              <span id="iconPause" class="hidden">❚❚</span>
+            </button>
+            <button id="btnNextStep" class="playback-btn" title="Next Slide (Right Arrow / Click)">▶</button>
+          </div>
+
+          <div class="timeline-track-wrapper">
+            <div class="timeline-step-info">
+              <span id="currentStepLabel" class="current-step-label">Overview • Master Plan</span>
+              <span id="currentStepCounter" class="current-step-counter">Slide 1 / 4</span>
+            </div>
+            <div id="timelineStepPills" class="timeline-pills"></div>
+          </div>
+
+          <div class="playback-extras">
+            <div class="speed-toggle">
+              <span>Speed:</span>
+              <select id="animSpeedSelect" class="speed-select">
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1.0x</option>
+                <option value="1.5">1.5x</option>
+              </select>
+            </div>
+            <button id="btnPresentationFullscreen" class="btn-present-mini" title="Enter PPT Presentation Mode">
+              <span>Fullscreen Present</span>
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- FULLSCREEN THEATRE / PPT PRESENTATION MODE OVERLAY -->
+    <div id="presentationOverlay" class="presentation-overlay hidden">
+      <!-- Click catcher backdrop for instant "Click anywhere to advance" -->
+      <div id="presentationClickCatcher" class="presentation-click-catcher" title="Click anywhere or press Space/Right Arrow to advance"></div>
+
+      <!-- Top Presentation HUD Bar -->
+      <header class="presentation-hud-header">
+        <div class="presentation-brand">
+          <span id="presProjectTitle" class="pres-title">Campus Master Plan Presentation</span>
+        </div>
+
+        <div class="presentation-step-tracker">
+          <span id="presStepCounter" class="pres-step-badge">Slide 1 / 4</span>
+          <div id="presProgressBar" class="pres-progress-bar"><div id="presProgressFill" class="pres-progress-fill"></div></div>
+        </div>
+
+        <div class="presentation-actions">
+          <button id="btnPresToggleNotes" class="pres-hud-btn" title="Toggle Speaker Notes (N)">Notes</button>
+          <button id="btnPresPrev" class="pres-hud-btn" title="Previous Slide (Left Arrow)">◀ Prev</button>
+          <button id="btnPresNext" class="pres-hud-btn pres-btn-primary" title="Next Slide (Click / Space / Right Arrow)">Next ▶</button>
+          <button id="btnPresExit" class="pres-hud-btn pres-btn-close" title="Exit Presentation (Esc)">✕ Exit</button>
+        </div>
+      </header>
+
+      <!-- Bottom Floating Presentation Milestone Card -->
+      <div id="presMilestoneCard" class="presentation-milestone-card">
+        <div class="milestone-badge-row">
+          <div id="presBadgeNum" class="milestone-num-disc">1</div>
+          <div class="milestone-tags">
+            <span id="presStepType" class="milestone-tag">LOCATION FOCUS</span>
+            <span id="presMetricTag" class="milestone-tag accent">Arrival Hub</span>
+          </div>
+        </div>
+        <h2 id="presMilestoneTitle" class="milestone-title">Main Campus Administration (1)</h2>
+        <p id="presMilestoneDesc" class="milestone-desc">Central administration hub and primary arrival node.</p>
+        <div class="milestone-nav-hint">
+          <span>Click anywhere or press <strong>Space / →</strong> to advance to next presentation step</span>
+        </div>
+      </div>
+
+      <!-- Speaker Notes Drawer -->
+      <div id="presSpeakerNotes" class="presentation-speaker-notes hidden">
+        <div class="notes-header">
+          <h4>Speaker Notes</h4>
+          <span class="notes-shortcut">[N]</span>
+        </div>
+        <p id="presNotesContent" class="notes-content"></p>
+      </div>
+    </div>
+
+    <!-- MODAL: Export PowerPoint / Video -->
+    <div id="exportModal" class="modal-backdrop hidden">
+      <div class="modal-window">
+        <div class="modal-header">
+          <div class="modal-icon-title">
+            <h3>Export Presentation for PowerPoint</h3>
+          </div>
+          <button id="btnCloseExportModal" class="modal-close-btn">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="export-options-grid">
+            <!-- Option 1: Native PPTX -->
+            <div class="export-card featured">
+              <div class="export-card-badge">DIRECT PPTX</div>
+              <div class="export-card-header">
+                <h4>PowerPoint Presentation (.pptx)</h4>
+                <p>Generates a formal Microsoft PowerPoint slide deck. Each on-click step is captured as a slide with high-resolution map graphics, permanent labels, highlighted routes, and presenter notes.</p>
+              </div>
+              <ul class="export-features">
+                <li>• Standard 16:9 widescreen presentation deck</li>
+                <li>• Step-by-step progressive animation reveal</li>
+                <li>• Formal callout annotations & slide notes</li>
+              </ul>
+              <button id="btnGeneratePptx" class="btn-export-action accent">
+                <span>Download .pptx File</span>
+              </button>
+            </div>
+
+            <!-- Option 2: 60FPS Video Capture for PPT -->
+            <div class="export-card">
+              <div class="export-card-header">
+                <h4>Video File for PPT (WebM / MP4)</h4>
+                <p>Record the smooth path drawing directly into a video. Insert into your PowerPoint slide (<em>Insert &gt; Video</em>) with playback set to <em>"Play on Click"</em>.</p>
+              </div>
+              <ul class="export-features">
+                <li>• Smooth path drawing & travel progression</li>
+                <li>• Ready for PowerPoint native video player</li>
+              </ul>
+              <button id="btnStartVideoRecording" class="btn-export-action secondary">
+                <span id="recordingBtnLabel">Record & Download Video</span>
+              </button>
+            </div>
+
+            <!-- Option 3: Standalone HTML -->
+            <div class="export-card">
+              <div class="export-card-header">
+                <h4>Standalone Presentation (HTML)</h4>
+                <p>Self-contained offline presentation file. Open in any browser during board meetings or client presentations.</p>
+              </div>
+              <ul class="export-features">
+                <li>• Interactive on-click navigation</li>
+                <li>• Operates 100% offline without dependencies</li>
+              </ul>
+              <button id="btnDownloadHtml" class="btn-export-action secondary">
+                <span>Download Standalone HTML</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="recordingProgressBox" class="recording-status-box hidden">
+            <div class="recording-spinner"></div>
+            <div>
+              <span id="recordingStatusTitle" style="font-weight: 700; color: #fff;">Recording presentation frames...</span>
+              <p id="recordingStatusSubtitle" style="font-size: 0.75rem; color: #94A3B8; margin: 0;"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
