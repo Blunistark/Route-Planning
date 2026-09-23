@@ -2,7 +2,7 @@
 export const sampleCampusPlan = {
   id: 'campus-masterplan',
   title: 'Campus Master Plan Presentation',
-  imageSrc: './image.png',
+  imageSrc: '/image.png',
   imageWidth: 738,
   imageHeight: 1454,
   showDialogOnFocus: true,

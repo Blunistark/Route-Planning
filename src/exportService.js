@@ -386,7 +386,7 @@ export class ExportService {
 </head>
 <body>
   <div id="view">
-    <img src="${this.state.imageSrc || './image.png'}" alt="Master Plan">
+    <img src="${this.state.imageSrc || '/image.png'}" alt="Master Plan">
     <div id="card">
       <h2 id="cardTitle"></h2>
       <p id="cardDesc"></p>

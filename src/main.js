@@ -301,7 +301,7 @@ function bindUIEvents() {
       uploadContainer.classList.remove('hidden');
     } else {
       uploadContainer.classList.add('hidden');
-      mapImage.src = './image.png';
+      mapImage.src = '/image.png';
     }
   });
 
