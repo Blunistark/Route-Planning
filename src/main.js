@@ -205,6 +205,21 @@ function bindUIEvents() {
     appState.title = e.target.value;
   });
 
+  // Mobile Sidebar Drawer Toggle & Backdrop
+  const btnToggleSidebar = document.getElementById('btnToggleSidebar');
+  const sidebarPanel = document.getElementById('sidebarPanel');
+  const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+
+  btnToggleSidebar?.addEventListener('click', () => {
+    sidebarPanel?.classList.toggle('sidebar-open');
+    sidebarBackdrop?.classList.toggle('active');
+  });
+
+  sidebarBackdrop?.addEventListener('click', () => {
+    sidebarPanel?.classList.remove('sidebar-open');
+    sidebarBackdrop?.classList.remove('active');
+  });
+
   // Sidebar Tabs
   const tabBtns = document.querySelectorAll('.sidebar-tabs .tab-btn');
   tabBtns.forEach(btn => {
@@ -276,9 +291,22 @@ function bindUIEvents() {
   });
 
   // Export Modal Triggers
-  btnExportPptx.addEventListener('click', () => exportModal.classList.remove('hidden'));
-  btnRecordVideo.addEventListener('click', () => exportModal.classList.remove('hidden'));
-  btnCloseExportModal.addEventListener('click', () => exportModal.classList.add('hidden'));
+  const resetExportNotice = () => {
+    const notice = document.getElementById('exportDownloadNotice');
+    notice?.classList.add('hidden');
+  };
+  btnExportPptx.addEventListener('click', () => {
+    resetExportNotice();
+    exportModal.classList.remove('hidden');
+  });
+  btnRecordVideo.addEventListener('click', () => {
+    resetExportNotice();
+    exportModal.classList.remove('hidden');
+  });
+  btnCloseExportModal.addEventListener('click', () => {
+    resetExportNotice();
+    exportModal.classList.add('hidden');
+  });
 
   btnGeneratePptx.addEventListener('click', async () => {
     btnGeneratePptx.disabled = true;
@@ -299,11 +327,14 @@ function bindUIEvents() {
     recordingProgressBox.classList.remove('hidden');
     recordingBtnLabel.textContent = 'Recording video...';
 
+    const pacingSelect = document.getElementById('videoPacingSelect');
+    const chosenPacing = pacingSelect?.value || 'slow';
+
     try {
       await exportService.recordVideo((cur, total, title) => {
         recordingStatusTitle.textContent = `Recording slide: ${title}`;
         recordingStatusSubtitle.textContent = `Progress ${cur} of ${total} (${Math.round((cur / total) * 100)}%)`;
-      });
+      }, { pacing: chosenPacing });
     } catch (err) {
       console.error(err);
       alert('Error recording video: ' + err.message);
@@ -486,7 +517,9 @@ function bindUIEvents() {
 
   // Click outside closes waypoint popover
   window.addEventListener('pointerdown', (e) => {
-    if (!e.target.closest('#waypointContextPopover') && !e.target.closest('.waypoint-handle')) {
+    if (!e.target.closest('#waypointContextPopover') &&
+        !e.target.closest('.waypoint-handle') &&
+        !e.target.closest('.waypoint-touch-target')) {
       hideWaypointPopover();
     }
   });
@@ -698,13 +731,38 @@ let activeWaypointContext = null;
 function showWaypointPopover(route, waypointIdx, pt) {
   const popover = document.getElementById('waypointContextPopover');
   const title = document.getElementById('waypointPopoverTitle');
-  if (!popover || !title) return;
+  const container = document.getElementById('canvasContainer');
+  if (!popover || !title || !container) return;
 
   activeWaypointContext = { route, waypointIdx, pt };
-  title.textContent = `${route.title || 'Corridor'} (Point ${waypointIdx + 1})`;
+  title.textContent = `${route.title || 'Corridor'} (Node #${waypointIdx + 1})`;
 
-  popover.style.left = `${pt.x}px`;
-  popover.style.top = `${pt.y}px`;
+  // Convert map image coordinates to screen coordinates relative to canvasContainer
+  const screenPt = canvasEngine.mapToScreen(pt.x, pt.y);
+  const contRect = container.getBoundingClientRect();
+
+  let x = screenPt.x - contRect.left;
+  let y = screenPt.y - contRect.top;
+
+  const popoverW = 260;
+  const popoverH = 145;
+
+  // Clamp horizontally so popover stays comfortably within container
+  x = Math.max(popoverW / 2 + 12, Math.min(contRect.width - popoverW / 2 - 12, x));
+
+  // Determine vertical placement: if too close to top bar, place below node; otherwise above
+  const isNearTop = (y - popoverH - 24) < 55;
+  if (isNearTop) {
+    popover.style.top = `${Math.round(y + 16)}px`;
+    popover.classList.add('popover-arrow-top');
+    popover.classList.remove('popover-arrow-bottom');
+  } else {
+    popover.style.top = `${Math.round(y - 14)}px`;
+    popover.classList.add('popover-arrow-bottom');
+    popover.classList.remove('popover-arrow-top');
+  }
+
+  popover.style.left = `${Math.round(x)}px`;
   popover.classList.remove('hidden');
 }
 
@@ -748,15 +806,38 @@ function renderRoutesSvg() {
         />
     `;
 
-    // Render interactive waypoint handles for splitting and branching
+    // Render interactive waypoint handles with touch targets for splitting and branching
     route.points.forEach((pt, pIdx) => {
       svgHtml += `
-        <circle cx="${pt.x}" cy="${pt.y}" r="4.5"
-          class="waypoint-handle"
-          data-route-id="${route.id}"
-          data-waypoint-idx="${pIdx}"
-          stroke="${color}"
-        />
+        <g class="waypoint-node-group" data-route-id="${route.id}" data-waypoint-idx="${pIdx}">
+          <!-- Generous touch hit area (36px diameter) for mobile phones and precise clicks -->
+          <circle cx="${pt.x}" cy="${pt.y}" r="18"
+            class="waypoint-touch-target"
+            data-route-id="${route.id}"
+            data-waypoint-idx="${pIdx}"
+            fill="transparent"
+            style="cursor: pointer;"
+          />
+          <!-- Visual accent ring -->
+          <circle cx="${pt.x}" cy="${pt.y}" r="8"
+            class="waypoint-halo"
+            stroke="${color}"
+            stroke-width="1.5"
+            fill="none"
+            opacity="0.4"
+            pointer-events="none"
+          />
+          <!-- Core waypoint node -->
+          <circle cx="${pt.x}" cy="${pt.y}" r="5"
+            class="waypoint-handle"
+            data-route-id="${route.id}"
+            data-waypoint-idx="${pIdx}"
+            fill="#FFFFFF"
+            stroke="${color}"
+            stroke-width="2.5"
+            style="cursor: pointer;"
+          />
+        </g>
       `;
     });
 
@@ -765,14 +846,18 @@ function renderRoutesSvg() {
 
   svgRoutesLayer.innerHTML = svgHtml;
 
-  // Add click handlers on waypoint handles
-  svgRoutesLayer.querySelectorAll('.waypoint-handle').forEach(handle => {
-    handle.addEventListener('click', (e) => {
+  // Add touch and click handlers on waypoint targets
+  svgRoutesLayer.querySelectorAll('.waypoint-touch-target, .waypoint-handle').forEach(target => {
+    target.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
-      const rId = handle.getAttribute('data-route-id');
-      const wpIdx = parseInt(handle.getAttribute('data-waypoint-idx'), 10);
+    });
+    target.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const rId = target.getAttribute('data-route-id');
+      const wpIdx = parseInt(target.getAttribute('data-waypoint-idx'), 10);
       const route = appState.routes.find(r => r.id === rId);
-      if (route && route.points[wpIdx]) {
+      if (route && route.points && route.points[wpIdx]) {
         showWaypointPopover(route, wpIdx, route.points[wpIdx]);
       }
     });
@@ -993,13 +1078,17 @@ function updateSidebarLists() {
     labelsList.appendChild(card);
   });
 
-  // 3. Routes list
+  // 3. Routes list with drag-and-drop reordering & sequencing
   const routesList = document.getElementById('routesList');
   routesList.innerHTML = '';
+  routesList.className = 'routes-reorderable-list';
+
   appState.routes.forEach((route, rIdx) => {
     const card = document.createElement('div');
-    card.className = 'item-card';
+    card.className = 'item-card route-card';
     card.setAttribute('data-route-card-id', route.id);
+    card.setAttribute('data-route-index', rIdx);
+    card.setAttribute('draggable', 'true');
 
     const isEnd = route.arrowStyle === 'end' || (route.arrowEnd !== false && !route.arrowStyle);
     const isBoth = route.arrowStyle === 'both';
@@ -1007,12 +1096,18 @@ function updateSidebarLists() {
     const isNone = route.arrowStyle === 'none' || route.arrowEnd === false;
 
     card.innerHTML = `
-      <div class="item-card-header">
-        <div class="item-badge-title">
-          <span style="color:${route.color || '#DC2626'}">━━▶</span>
+      <div class="item-card-header" style="align-items: center;">
+        <div class="item-badge-title" style="display:flex; align-items:center; gap:6px; flex:1; min-width:0;">
+          <span class="route-drag-handle" title="Drag to reorder sequence" draggable="false">⠿</span>
+          <span class="seq-order-badge" title="Sequence Position #${rIdx + 1}">#${rIdx + 1}</span>
+          <span style="color:${route.color || '#DC2626'}; font-size:0.8rem;">━━▶</span>
           <span class="item-card-title">${route.title || `Route Corridor ${rIdx + 1}`}</span>
         </div>
         <div class="item-card-actions">
+          <div class="btn-reorder-group">
+            <button class="btn-reorder-dir btn-move-up" title="Move earlier in presentation sequence" ${rIdx === 0 ? 'disabled' : ''}>▲</button>
+            <button class="btn-reorder-dir btn-move-down" title="Move later in presentation sequence" ${rIdx === appState.routes.length - 1 ? 'disabled' : ''}>▼</button>
+          </div>
           <button class="icon-btn-subtle delete" title="Delete route">✕</button>
         </div>
       </div>
@@ -1041,6 +1136,89 @@ function updateSidebarLists() {
         <span>Duration: <input type="number" class="form-input edit-route-duration" style="width:50px; display:inline-block; padding:1px 4px; font-size:0.75rem;" step="0.5" min="1" max="10" value="${route.duration || 3}">s</span>
       </div>
     `;
+
+    // Up and Down reorder button clicks
+    card.querySelector('.btn-move-up')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (rIdx > 0) {
+        const item = appState.routes.splice(rIdx, 1)[0];
+        appState.routes.splice(rIdx - 1, 0, item);
+        animationEngine.compileSteps();
+        renderTimelinePills();
+        renderRoutesSvg();
+        updateSidebarLists();
+      }
+    });
+
+    card.querySelector('.btn-move-down')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (rIdx < appState.routes.length - 1) {
+        const item = appState.routes.splice(rIdx, 1)[0];
+        appState.routes.splice(rIdx + 1, 0, item);
+        animationEngine.compileSteps();
+        renderTimelinePills();
+        renderRoutesSvg();
+        updateSidebarLists();
+      }
+    });
+
+    // Drag and drop event handlers
+    card.addEventListener('dragstart', (e) => {
+      if (e.target.closest('input') || e.target.closest('select') || e.target.closest('button')) {
+        e.preventDefault();
+        return;
+      }
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', rIdx.toString());
+      setTimeout(() => card.classList.add('route-card-dragging'), 0);
+    });
+
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = card.getBoundingClientRect();
+      const relY = e.clientY - rect.top;
+      if (relY < rect.height / 2) {
+        card.classList.add('route-drop-before');
+        card.classList.remove('route-drop-after');
+      } else {
+        card.classList.add('route-drop-after');
+        card.classList.remove('route-drop-before');
+      }
+    });
+
+    card.addEventListener('dragleave', () => {
+      card.classList.remove('route-drop-before', 'route-drop-after');
+    });
+
+    card.addEventListener('drop', (e) => {
+      e.preventDefault();
+      card.classList.remove('route-drop-before', 'route-drop-after');
+      const srcIdxStr = e.dataTransfer.getData('text/plain');
+      const srcIdx = parseInt(srcIdxStr, 10);
+      if (isNaN(srcIdx) || srcIdx === rIdx) return;
+
+      const rect = card.getBoundingClientRect();
+      const relY = e.clientY - rect.top;
+      let targetIdx = relY < rect.height / 2 ? rIdx : rIdx + 1;
+      if (srcIdx < targetIdx) {
+        targetIdx--;
+      }
+
+      const moved = appState.routes.splice(srcIdx, 1)[0];
+      appState.routes.splice(targetIdx, 0, moved);
+
+      animationEngine.compileSteps();
+      renderTimelinePills();
+      renderRoutesSvg();
+      updateSidebarLists();
+    });
+
+    card.addEventListener('dragend', () => {
+      document.querySelectorAll('.route-card').forEach(c => {
+        c.classList.remove('route-card-dragging', 'route-drop-before', 'route-drop-after');
+      });
+    });
 
     card.addEventListener('click', (e) => {
       if (e.target.closest('.delete') || e.target.closest('input') || e.target.closest('select') || e.target.closest('button')) return;

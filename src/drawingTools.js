@@ -293,8 +293,14 @@ export class DrawingTools {
       part2Points = [mid, p1];
     } else {
       let splitIdx = waypointIndex;
-      if (splitIdx === null || splitIdx === undefined || splitIdx <= 0 || splitIdx >= original.points.length - 1) {
+      if (splitIdx === null || splitIdx === undefined) {
         splitIdx = Math.floor(original.points.length / 2);
+      } else if (splitIdx <= 0) {
+        // If user picked the very first point, split after the first segment
+        splitIdx = 1;
+      } else if (splitIdx >= original.points.length - 1) {
+        // If user picked the very last point, split before the last segment
+        splitIdx = original.points.length - 2;
       }
       part1Points = original.points.slice(0, splitIdx + 1);
       part2Points = original.points.slice(splitIdx);
@@ -309,8 +315,9 @@ export class DrawingTools {
       id: `route-${Date.now()}-1`,
       title: `${original.title || 'Corridor'} (Leg 1)`,
       toStopId: null,
-      arrowEnd: false, // arrow continues on second leg
+      arrowEnd: false, // continues on second leg
       arrowStart: original.arrowStart || false,
+      arrowStyle: original.arrowStart ? 'start' : 'none',
       arrowSize: original.arrowSize || 'standard',
       duration: dur1,
       points: part1Points
@@ -323,6 +330,7 @@ export class DrawingTools {
       fromStopId: null,
       arrowEnd: original.arrowEnd !== false,
       arrowStart: false,
+      arrowStyle: original.arrowStyle || 'end',
       arrowSize: original.arrowSize || 'standard',
       duration: dur2,
       points: part2Points
@@ -345,12 +353,15 @@ export class DrawingTools {
     if (!route || !route.points || route.points.length === 0) return;
 
     let branchPoint = null;
+    let ptLabel = '';
     if (waypointIndex !== null && waypointIndex !== undefined && route.points[waypointIndex]) {
       branchPoint = route.points[waypointIndex];
+      ptLabel = `Point ${waypointIndex + 1}`;
     } else {
       // Default to midpoint or last point
       const midIdx = Math.floor(route.points.length / 2);
       branchPoint = route.points[midIdx] || route.points[0];
+      ptLabel = 'Midpoint';
     }
 
     // Activate Route tool mode and start drawing from the branch point
@@ -361,7 +372,8 @@ export class DrawingTools {
       toolPathBtn.classList.add('active');
     }
 
-    this.startPathDrawing([{ x: branchPoint.x, y: branchPoint.y }], route.title || 'Corridor');
+    const branchName = route.title ? `${route.title} (${ptLabel})` : 'Corridor Branch';
+    this.startPathDrawing([{ x: branchPoint.x, y: branchPoint.y }], branchName);
   }
 
   // --- Zone Boundary Drawing ---

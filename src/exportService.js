@@ -1,6 +1,82 @@
 // Export Service: PPTX Generation, Video Recording, and Standalone HTML with Permanent Labels and Callouts
 import pptxgen from 'pptxgenjs';
 
+// Universal mobile & browser download helper
+export function triggerBrowserDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = url;
+  a.download = filename;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+
+  // Trigger standard browser download
+  try {
+    a.click();
+  } catch (err) {
+    console.warn('Auto click failed, using direct anchor fallback', err);
+  }
+
+  // Keep DOM element and object URL alive for 90 seconds so mobile browsers complete download
+  setTimeout(() => {
+    try {
+      if (a.parentNode) a.parentNode.removeChild(a);
+    } catch (_) {}
+  }, 2000);
+
+  setTimeout(() => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (_) {}
+  }, 90000);
+
+  // Update UI download notice if present in DOM (for direct tap on mobile / blocked popups)
+  const notice = document.getElementById('exportDownloadNotice');
+  const directLink = document.getElementById('btnDirectDownloadFile');
+  const title = document.getElementById('exportNoticeTitle');
+  const subtitle = document.getElementById('exportNoticeSubtitle');
+  const shareBtn = document.getElementById('btnShareFileMobile');
+
+  if (notice && directLink) {
+    directLink.href = url;
+    directLink.download = filename;
+    directLink.textContent = `⬇ Tap to Save ${filename}`;
+    if (title) title.textContent = `File Ready: ${filename}`;
+    if (subtitle) {
+      subtitle.textContent = `Download initiated. On mobile phones or tablets, tap the button below to save directly to Files or iCloud:`;
+    }
+    notice.classList.remove('hidden');
+
+    if (shareBtn) {
+      try {
+        const fileObj = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+        if (navigator.canShare && navigator.canShare({ files: [fileObj] })) {
+          shareBtn.classList.remove('hidden');
+          shareBtn.onclick = async (e) => {
+            e.preventDefault();
+            try {
+              await navigator.share({
+                title: filename,
+                files: [fileObj]
+              });
+            } catch (shareErr) {
+              console.log('Share canceled or error', shareErr);
+            }
+          };
+        } else {
+          shareBtn.classList.add('hidden');
+        }
+      } catch (_) {
+        shareBtn.classList.add('hidden');
+      }
+    }
+  }
+
+  return url;
+}
+
 export class ExportService {
   constructor(appState, canvasEngine, animEngine) {
     this.state = appState;
@@ -193,24 +269,43 @@ export class ExportService {
     }
 
     const safeTitle = (this.state.title || 'Campus_Master_Plan').replace(/[^a-z0-9_-]/gi, '_');
-    await pptx.writeFile({ fileName: `${safeTitle}.pptx` });
+    const fileName = `${safeTitle}.pptx`;
+    try {
+      const blob = await pptx.write({ outputType: 'blob' });
+      triggerBrowserDownload(blob, fileName);
+    } catch (writeErr) {
+      console.warn('Direct blob pptx write failed, using writeFile fallback', writeErr);
+      await pptx.writeFile({ fileName });
+    }
   }
 
   // -------------------------------------------------------------
   // 2. Video Capture with Camera Zoom and Pan Transitions
   // -------------------------------------------------------------
-  async recordVideo(onProgress) {
+  async recordVideo(onProgress, options = {}) {
     const canvas = document.createElement('canvas');
     canvas.width = 1280;
     canvas.height = 720;
     const ctx = canvas.getContext('2d');
+
+    const pacing = options.pacing || 'slow';
+    // Multipliers for frames per phase
+    // 'slow': calm, executive pacing where viewers can comfortably observe camera motion and read callout boxes
+    // 'standard': medium pacing
+    // 'brisk': faster
+    let paceMultiplier = 2.4; // default calm/deliberate
+    if (pacing === 'standard') {
+      paceMultiplier = 1.6;
+    } else if (pacing === 'brisk') {
+      paceMultiplier = 1.0;
+    }
 
     const stream = canvas.captureStream(60);
     const mediaRecorder = new MediaRecorder(stream, {
       mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
         ? 'video/webm;codecs=vp9'
         : 'video/webm',
-      videoBitsPerSecond: 4000000
+      videoBitsPerSecond: 4500000
     });
 
     const recordedChunks = [];
@@ -231,12 +326,12 @@ export class ExportService {
 
       if (onProgress) onProgress(i + 1, steps.length, step.title);
 
-      // Phase 1: Smooth Camera Zoom/Pan Transition to New Slide (if moving from a previous camera state)
+      // Phase 1: Smooth Camera Zoom/Pan Transition to New Slide (~1.0s to 1.5s glide)
       if (i > 0) {
-        const panFrames = 26; // ~400ms smooth camera glide
+        const panFrames = Math.round(55 * paceMultiplier);
         for (let p = 0; p < panFrames; p++) {
           const t = p / panFrames;
-          // Smooth easeInOutCubic
+          // Smooth easeInOutCubic for cinema-like camera motion
           const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
           const interpolatedCamera = {
@@ -245,22 +340,23 @@ export class ExportService {
             centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
           };
 
-          // Draw transitioning frame with previous step route progress completed
           await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
           await new Promise(r => setTimeout(r, 16));
         }
       }
 
-      // Phase 2: Active Step Drawing & Route Progression
-      const drawFrames = step.type === 'route' ? 44 : 28;
+      // Phase 2: Active Step Drawing & Route Progression (~1.5s to 2.5s)
+      const baseDraw = step.type === 'route' ? 50 : 25;
+      const drawFrames = Math.round(baseDraw * paceMultiplier);
       for (let f = 0; f < drawFrames; f++) {
-        const progress = f / (drawFrames - 1);
+        const progress = f / Math.max(1, drawFrames - 1);
         await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
         await new Promise(r => setTimeout(r, 16));
       }
 
-      // Phase 3: Hold step snapshot so viewer can read callout dialog and notes
-      const holdFrames = step.type === 'stop' ? 32 : 22;
+      // Phase 3: Hold step snapshot so audience can read callout dialog, badge, and metrics (~1.8s to 2.8s)
+      const baseHold = step.type === 'stop' ? 55 : (step.type === 'overview' ? 65 : 45);
+      const holdFrames = Math.round(baseHold * paceMultiplier);
       for (let h = 0; h < holdFrames; h++) {
         await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
         await new Promise(r => setTimeout(r, 16));
@@ -272,14 +368,10 @@ export class ExportService {
     return new Promise((resolve) => {
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
         const safeTitle = (this.state.title || 'Campus_Plan').replace(/[^a-z0-9_-]/gi, '_');
-        a.download = `${safeTitle}_animation.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
-        resolve();
+        const fileName = `${safeTitle}_animation.webm`;
+        triggerBrowserDownload(blob, fileName);
+        resolve(blob);
       };
       mediaRecorder.stop();
     });
@@ -595,25 +687,15 @@ export class ExportService {
 </body>
 </html>`;
 
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
     const safeTitle = (this.state.title || 'Campus_Plan').replace(/[^a-z0-9_-]/gi, '_');
-    a.download = `${safeTitle}_presentation.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBrowserDownload(blob, `${safeTitle}_presentation.html`);
   }
 
   exportJson() {
     const jsonStr = JSON.stringify(this.state, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
+    const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
     const safeTitle = (this.state.title || 'Campus_Plan').replace(/[^a-z0-9_-]/gi, '_');
-    a.download = `${safeTitle}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBrowserDownload(blob, `${safeTitle}.json`);
   }
 }

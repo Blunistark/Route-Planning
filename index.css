@@ -798,34 +798,82 @@ body {
   transition: r 0.15s ease, fill 0.15s ease;
 }
 
-.waypoint-handle:hover {
+.waypoint-handle {
+  cursor: pointer;
+  pointer-events: auto;
+  transition: r 0.15s ease, fill 0.15s ease;
+}
+
+.waypoint-touch-target {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.waypoint-node-group:hover .waypoint-handle {
   r: 6.5px;
   fill: #FEF08A;
 }
 
-/* Waypoint Context Popover */
+.waypoint-node-group:hover .waypoint-halo {
+  opacity: 0.8;
+  stroke-width: 2.5px;
+}
+
+/* Waypoint Context Popover (Anchored cleanly in viewport coordinates over selected node) */
 .waypoint-context-popover {
   position: absolute;
-  transform: translate(-50%, -100%);
   background: #0F172A;
-  border: 1px solid #475569;
+  border: 1.5px solid #475569;
   border-radius: var(--radius-sm);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
-  z-index: 40;
-  width: 220px;
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.75);
+  z-index: 100;
+  width: 260px;
   pointer-events: auto;
+}
+
+.waypoint-context-popover.popover-arrow-bottom {
+  transform: translate(-50%, -100%);
   margin-top: -12px;
+}
+
+.waypoint-context-popover.popover-arrow-top {
+  transform: translate(-50%, 0);
+  margin-top: 14px;
+}
+
+.waypoint-context-popover.popover-arrow-bottom .popover-pointer-arrow {
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid #475569;
+}
+
+.waypoint-context-popover.popover-arrow-top .popover-pointer-arrow {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 7px solid #475569;
 }
 
 .waypoint-context-popover .popover-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 10px;
+  padding: 8px 10px;
   background: #1E293B;
   border-bottom: 1px solid #334155;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 700;
   color: #CBD5E1;
 }
@@ -835,7 +883,8 @@ body {
   border: none;
   color: #94A3B8;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
+  padding: 0 4px;
 }
 
 .waypoint-context-popover .popover-close-btn:hover {
@@ -843,10 +892,10 @@ body {
 }
 
 .waypoint-context-popover .popover-body {
-  padding: 6px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .popover-action-btn {
@@ -854,13 +903,14 @@ body {
   flex-direction: column;
   align-items: flex-start;
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px 10px;
   background: #1E293B;
   border: 1px solid #334155;
   border-radius: var(--radius-xs);
   cursor: pointer;
   text-align: left;
   transition: background 0.15s ease, border-color 0.15s ease;
+  min-height: 46px;
 }
 
 .popover-action-btn:hover {
@@ -869,27 +919,16 @@ body {
 }
 
 .popover-action-title {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 700;
   color: #F8FAFC;
 }
 
 .popover-action-desc {
-  font-size: 0.65rem;
+  font-size: 0.67rem;
   color: #94A3B8;
   margin-top: 2px;
-}
-
-.popover-pointer-arrow {
-  position: absolute;
-  bottom: -6px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-top: 6px solid #475569;
+  line-height: 1.3;
 }
 
 /* Formal Architectural Pins */
@@ -1620,5 +1659,289 @@ body {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ==========================================================================
+   ROUTE REORDERING (DRAG & DROP + SEQUENCING)
+   ========================================================================== */
+.routes-reorderable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.route-card {
+  position: relative;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.route-card.route-card-dragging {
+  opacity: 0.45;
+  border: 2px dashed var(--color-formal-blue) !important;
+  background: #141E33;
+}
+
+.route-card.route-drop-before {
+  border-top: 3px solid var(--color-formal-blue) !important;
+  transform: translateY(2px);
+}
+
+.route-card.route-drop-after {
+  border-bottom: 3px solid var(--color-formal-blue) !important;
+  transform: translateY(-2px);
+}
+
+.route-drag-handle {
+  cursor: grab;
+  color: #64748B;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+
+.route-drag-handle:hover {
+  color: #F8FAFC;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.route-drag-handle:active {
+  cursor: grabbing;
+}
+
+.seq-order-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  background: #0284C7;
+  color: #FFFFFF;
+  padding: 2px 6px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.btn-reorder-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.btn-reorder-dir {
+  background: #1E293B;
+  border: 1px solid #334155;
+  color: #CBD5E1;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-reorder-dir:hover:not(:disabled) {
+  background: #334155;
+  color: #FFFFFF;
+  border-color: var(--color-formal-blue);
+}
+
+.btn-reorder-dir:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
+   BROWSER & MOBILE DOWNLOAD NOTICE
+   ========================================================================== */
+.export-download-notice {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1.5px solid #10B981;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.export-notice-icon {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #10B981;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.export-notice-body {
+  flex: 1;
+}
+
+.export-notice-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.export-notice-subtitle {
+  font-size: 0.74rem;
+  color: #A7F3D0;
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.export-notice-buttons {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-direct-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #059669;
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 0.82rem;
+  border-radius: 4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.4);
+}
+
+.btn-direct-download:hover {
+  background: #10B981;
+}
+
+.btn-share-mobile {
+  padding: 8px 14px;
+  background: #1E293B;
+  color: #F8FAFC;
+  border: 1px solid #475569;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-share-mobile:hover {
+  background: #334155;
+}
+
+/* ==========================================================================
+   MOBILE & RESPONSIVE LAYOUT
+   ========================================================================== */
+.mobile-sidebar-toggle {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  background: #1E293B;
+  border: 1px solid var(--border-formal);
+  color: #F8FAFC;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sidebar-mobile-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 55;
+  backdrop-filter: blur(2px);
+}
+
+@media (max-width: 860px) {
+  .mobile-sidebar-toggle {
+    display: inline-flex;
+  }
+
+  .sidebar-panel {
+    position: fixed;
+    top: 52px;
+    bottom: 0;
+    left: 0;
+    width: 320px;
+    max-width: 86vw;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 60;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.7);
+  }
+
+  .sidebar-panel.sidebar-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-mobile-backdrop.active {
+    display: block;
+  }
+
+  .app-header {
+    padding: 0 8px;
+    gap: 8px;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .project-title-input {
+    width: 130px;
+  }
+
+  .header-tools {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+    gap: 4px;
+  }
+
+  .tool-btn {
+    padding: 6px 8px;
+    font-size: 0.72rem;
+  }
+
+  .bottom-playback-bar {
+    padding: 6px 10px;
+    gap: 8px;
+  }
+
+  .current-step-display {
+    max-width: 140px;
+  }
+
+  .current-step-label {
+    font-size: 0.76rem;
+  }
+
+  .step-counter {
+    font-size: 0.68rem;
+  }
+
+  .timeline-pills {
+    max-width: 120px;
+    overflow-x: auto;
+  }
+
+  .modal-card {
+    width: 95vw !important;
+    max-height: 90vh;
+  }
+}
 
 .hidden { display: none !important; }

@@ -105,12 +105,33 @@ export class CanvasEngine {
     }, { passive: false });
 
     // Pointer down for pan or drawing
+    this.activePointers = new Map();
+    this.lastPinchDist = null;
+    this.lastPinchCenter = null;
+
     this.container.addEventListener('pointerdown', (e) => {
-      // Ignore if clicking on interactive controls (hud buttons, dialogs, popovers, etc.)
+      // Track active pointer
+      this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      // Multi-touch pinch gesture on mobile
+      if (this.activePointers.size === 2) {
+        const pts = Array.from(this.activePointers.values());
+        this.lastPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        this.lastPinchCenter = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        this.isPanning = false;
+        return;
+      }
+
+      // Ignore if clicking on interactive controls (hud buttons, dialogs, popovers, waypoint handles, etc.)
       if (e.target.closest('.hud-controls') ||
           e.target.closest('.instruction-pill') ||
           e.target.closest('.waypoint-context-popover') ||
+          e.target.closest('.waypoint-handle') ||
+          e.target.closest('.waypoint-touch-target') ||
+          e.target.closest('.map-pin') ||
+          e.target.closest('.permanent-map-label') ||
           e.target.closest('.modal-backdrop') ||
+          e.target.closest('.formal-callout-dialog') ||
           e.target.closest('.callout-dialog')) {
         return;
       }
@@ -133,9 +154,39 @@ export class CanvasEngine {
 
     // Pointer move
     this.container.addEventListener('pointermove', (e) => {
+      if (this.activePointers.has(e.pointerId)) {
+        this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      // Handle pinch-to-zoom with two fingers
+      if (this.activePointers.size === 2) {
+        const pts = Array.from(this.activePointers.values());
+        const currentDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        const currentCenter = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+
+        if (this.lastPinchDist && currentDist > 0) {
+          const factor = currentDist / this.lastPinchDist;
+          const rect = this.container.getBoundingClientRect();
+          const zoomX = currentCenter.x - rect.left;
+          const zoomY = currentCenter.y - rect.top;
+          this.zoomAt(zoomX, zoomY, factor);
+
+          if (this.lastPinchCenter) {
+            this.panX += (currentCenter.x - this.lastPinchCenter.x);
+            this.panY += (currentCenter.y - this.lastPinchCenter.y);
+            this.applyTransform();
+          }
+        }
+
+        this.lastPinchDist = currentDist;
+        this.lastPinchCenter = currentCenter;
+        this.hasMovedSignificantly = true;
+        return;
+      }
+
       if (this.pointerDownPos) {
         const dist = Math.hypot(e.clientX - this.pointerDownPos.x, e.clientY - this.pointerDownPos.y);
-        if (dist > 5) {
+        if (dist > 6) {
           this.hasMovedSignificantly = true;
           // In ALL modes (including route drawing 'path', 'zone', 'place', 'label', editing), dragging moves the map!
           if (!this.isPanning) {
@@ -156,7 +207,13 @@ export class CanvasEngine {
     });
 
     // Pointer up
-    this.container.addEventListener('pointerup', (e) => {
+    const handlePointerEnd = (e) => {
+      this.activePointers.delete(e.pointerId);
+      if (this.activePointers.size < 2) {
+        this.lastPinchDist = null;
+        this.lastPinchCenter = null;
+      }
+
       if (this.isPanning) {
         this.isPanning = false;
         this.container.classList.remove('grabbing');
@@ -167,7 +224,10 @@ export class CanvasEngine {
           this.setMode(this.mode);
         }
       }
-    });
+    };
+
+    this.container.addEventListener('pointerup', handlePointerEnd);
+    this.container.addEventListener('pointercancel', handlePointerEnd);
 
     // Canvas Click (for placing stops, drawing paths/zones)
     this.container.addEventListener('click', (e) => {

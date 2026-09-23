@@ -17,6 +17,16 @@
     <!-- Top Header Navigation Bar -->
     <header class="app-header">
       <div class="header-left">
+        <!-- Mobile Sidebar Toggle -->
+        <button id="btnToggleSidebar" class="mobile-sidebar-toggle" title="Toggle Layers and Inspector" aria-label="Toggle Navigation">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+          <span class="mobile-toggle-text">Layers</span>
+        </button>
+
         <div class="brand">
           <div class="brand-icon">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -82,8 +92,11 @@
 
     <!-- Main Workspace Body -->
     <div class="app-body">
+      <!-- Mobile Sidebar Backdrop -->
+      <div id="sidebarBackdrop" class="sidebar-mobile-backdrop"></div>
+
       <!-- Left Sidebar: Controls & Steps -->
-      <aside class="sidebar-panel">
+      <aside class="sidebar-panel" id="sidebarPanel">
         <div class="sidebar-tabs">
           <button class="tab-btn active" data-tab="stops">
             <span>Stops</span>
@@ -165,9 +178,9 @@
               <h3>Route Corridors</h3>
               <button id="btnDrawRouteQuick" class="mini-btn">+ Draw Route</button>
             </div>
-            <p class="pane-help">Planned corridors with directional arrowheads. You can split any route at a waypoint or branch new corridors from existing paths.</p>
-            <div id="routesList" class="items-list">
-              <!-- Dynamically populated -->
+            <p class="pane-help">Planned corridors with directional arrows. <strong>Drag cards or tap ▲ / ▼</strong> to customize visualization sequence order. Click any node on the map to split or branch.</p>
+            <div id="routesList" class="items-list routes-reorderable-list">
+              <!-- Dynamically populated with sequence order badges and drag handles -->
             </div>
           </div>
 
@@ -289,26 +302,26 @@
               </div>
               <div class="callout-pointer-arrow"></div>
             </div>
-
-            <!-- Waypoint Context Popover (For Splitting and Branching Paths) -->
-            <div id="waypointContextPopover" class="waypoint-context-popover hidden">
-              <div class="popover-header">
-                <span id="waypointPopoverTitle">Path Waypoint</span>
-                <button id="btnCloseWaypointPopover" class="popover-close-btn">✕</button>
-              </div>
-              <div class="popover-body">
-                <button id="btnPopoverSplitRoute" class="popover-action-btn">
-                  <span class="popover-action-title">✂ Split Path Here</span>
-                  <span class="popover-action-desc">Divides corridor into two separate connected routes</span>
-                </button>
-                <button id="btnPopoverBranchRoute" class="popover-action-btn">
-                  <span class="popover-action-title">⑂ Branch Path From Here</span>
-                  <span class="popover-action-desc">Starts a new corridor fork branching off this point</span>
-                </button>
-              </div>
-              <div class="popover-pointer-arrow"></div>
-            </div>
           </div>
+        </div>
+
+        <!-- Waypoint Context Popover (Anchored cleanly in viewport coordinates over selected node) -->
+        <div id="waypointContextPopover" class="waypoint-context-popover hidden">
+          <div class="popover-header">
+            <span id="waypointPopoverTitle">Path Waypoint Node</span>
+            <button id="btnCloseWaypointPopover" class="popover-close-btn" title="Close">✕</button>
+          </div>
+          <div class="popover-body">
+            <button id="btnPopoverSplitRoute" class="popover-action-btn" type="button">
+              <span class="popover-action-title">✂ Split Path Here</span>
+              <span class="popover-action-desc">Divides corridor into two separate connected routes</span>
+            </button>
+            <button id="btnPopoverBranchRoute" class="popover-action-btn" type="button">
+              <span class="popover-action-title">⑂ Branch Path From Here</span>
+              <span class="popover-action-desc">Starts a new corridor fork branching off this point</span>
+            </button>
+          </div>
+          <div class="popover-pointer-arrow"></div>
         </div>
 
         <!-- Bottom Timeline & Presentation Control Bar -->
@@ -437,6 +450,14 @@
                 <li>• Real-time route drawing & traveler progression</li>
                 <li>• Ready for PowerPoint native video player</li>
               </ul>
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                <label for="videoPacingSelect" style="font-size: 0.72rem; color: #94A3B8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Animation Pacing / Speed</label>
+                <select id="videoPacingSelect" class="formal-select" style="background: #0B1120; border: 1px solid #334155; color: #F1F5F9; font-size: 0.8rem; padding: 6px 10px; border-radius: 4px;">
+                  <option value="slow" selected>Gentle & Deliberate (Recommended — Relaxed camera glides & comfortable reading pause)</option>
+                  <option value="standard">Standard (Moderate pacing)</option>
+                  <option value="brisk">Brisk (Faster overview)</option>
+                </select>
+              </div>
               <button id="btnStartVideoRecording" class="btn-export-action secondary">
                 <span id="recordingBtnLabel">Record & Download Video</span>
               </button>
@@ -463,6 +484,19 @@
             <div>
               <span id="recordingStatusTitle" style="font-weight: 700; color: #fff;">Recording presentation frames...</span>
               <p id="recordingStatusSubtitle" style="font-size: 0.75rem; color: #94A3B8; margin: 0;"></p>
+            </div>
+          </div>
+
+          <!-- Browser Direct Download Notice (for Mobile & Desktop) -->
+          <div id="exportDownloadNotice" class="export-download-notice hidden">
+            <div class="export-notice-icon">✓</div>
+            <div class="export-notice-body">
+              <div id="exportNoticeTitle" class="export-notice-title">Export Ready for Download!</div>
+              <div id="exportNoticeSubtitle" class="export-notice-subtitle">Your browser download should begin automatically. On mobile devices or if download is blocked, tap below:</div>
+              <div class="export-notice-buttons">
+                <a id="btnDirectDownloadFile" class="btn-direct-download" href="#" download>⬇ Download File to Device</a>
+                <button id="btnShareFileMobile" class="btn-share-mobile hidden" type="button">↗ Share / Save to Files</button>
+              </div>
             </div>
           </div>
         </div>

@@ -54,89 +54,135 @@ export class AnimationEngine {
       activeZoneId: null
     });
 
-    const { stops, routes, zones } = this.state;
+    const { stops = [], routes = [], zones = [] } = this.state;
+    const visitedStops = new Set();
 
-    stops.forEach((stop, idx) => {
-      // Step: Reveal stop & open focus callout dialog
-      this.steps.push({
-        index: this.steps.length,
-        type: 'stop',
-        title: stop.title,
-        badge: stop.badge,
-        subtitle: `Stop ${stop.badge}`,
-        desc: stop.desc,
-        notes: stop.notes || `Overview of ${stop.title}.`,
-        metric: stop.metric || 'Key Campus Hub',
-        tag: stop.tag || 'Campus Facility',
-        focusPoint: { x: stop.x, y: stop.y, zoom: 1.35 },
-        activeStopId: stop.id,
-        activeStopData: stop,
-        activeRouteId: null,
-        activeZoneId: null
-      });
+    if (routes && routes.length > 0) {
+      // Sequence follows the exact user-defined ordering of routes!
+      routes.forEach((route, rIdx) => {
+        if (!route.points || route.points.length < 2) return;
 
-      // Step: Trace route to next stop
-      if (idx < stops.length - 1) {
-        const nextStop = stops[idx + 1];
-        let matchingRoute = routes.find(r => r.fromStopId === stop.id && r.toStopId === nextStop.id);
-        if (!matchingRoute) {
-          // Check proximity to stop and nextStop
-          matchingRoute = routes.find(r => {
-            if (!r.points || r.points.length < 2) return false;
-            const startP = r.points[0];
-            const endP = r.points[r.points.length - 1];
-            const dStart = Math.hypot(startP.x - stop.x, startP.y - stop.y);
-            const dEnd = Math.hypot(endP.x - nextStop.x, endP.y - nextStop.y);
-            return (dStart < 120 && dEnd < 120);
-          });
-        }
-        if (!matchingRoute && routes[idx]) {
-          matchingRoute = routes[idx];
+        // Determine starting stop
+        let fromStop = stops.find(s => s.id === route.fromStopId);
+        if (!fromStop && route.points.length > 0) {
+          const startP = route.points[0];
+          fromStop = stops.find(s => Math.hypot(s.x - startP.x, s.y - startP.y) < 110);
         }
 
-        if (matchingRoute) {
-          const matchingZone = zones.find(z => z.points && z.points.some(p => Math.hypot(p.x - nextStop.x, p.y - nextStop.y) < 200));
+        // Determine destination stop
+        let toStop = stops.find(s => s.id === route.toStopId);
+        if (!toStop && route.points.length > 0) {
+          const endP = route.points[route.points.length - 1];
+          toStop = stops.find(s => s.id !== fromStop?.id && Math.hypot(s.x - endP.x, s.y - endP.y) < 110);
+        }
 
+        // 1. Reveal fromStop if not yet visited
+        if (fromStop && !visitedStops.has(fromStop.id)) {
+          visitedStops.add(fromStop.id);
           this.steps.push({
             index: this.steps.length,
-            type: 'route',
-            title: matchingRoute.title || `Route to ${nextStop.title}`,
-            subtitle: `Transit Leg: ${stop.badge} → ${nextStop.badge}`,
-            desc: `Connecting corridor towards ${nextStop.title}.`,
-            notes: `Trace corridor from ${stop.title} to ${nextStop.title}. Point out safety features and circulation efficiency.`,
-            metric: matchingRoute.duration ? `${Math.round(matchingRoute.duration * 40)}m • Planned Link` : 'Connecting Walkway',
-            focusBounds: matchingRoute.points,
-            activeStopId: nextStop.id,
-            activeStopData: nextStop,
-            activeRouteId: matchingRoute.id,
-            activeZoneId: matchingZone ? matchingZone.id : null,
-            routeData: matchingRoute
+            type: 'stop',
+            title: fromStop.title,
+            badge: fromStop.badge,
+            subtitle: `Stop ${fromStop.badge || visitedStops.size}`,
+            desc: fromStop.desc,
+            notes: fromStop.notes || `Overview of ${fromStop.title}.`,
+            metric: fromStop.metric || 'Key Campus Hub',
+            tag: fromStop.tag || 'Campus Facility',
+            focusPoint: { x: fromStop.x, y: fromStop.y, zoom: 1.35 },
+            activeStopId: fromStop.id,
+            activeStopData: fromStop,
+            activeRouteId: null,
+            activeZoneId: null
           });
         }
-      }
-    });
 
-    // Also include any standalone routes not already featured in steps
-    const includedRouteIds = new Set(this.steps.filter(s => s.activeRouteId).map(s => s.activeRouteId));
-    routes.forEach((route, rIdx) => {
-      if (!includedRouteIds.has(route.id) && route.points && route.points.length >= 2) {
+        // 2. Animate route corridor in this exact ordered position
+        const matchingZone = zones.find(z => z.points && toStop && z.points.some(p => Math.hypot(p.x - toStop.x, p.y - toStop.y) < 200));
+
         this.steps.push({
           index: this.steps.length,
           type: 'route',
           title: route.title || `Route Corridor ${rIdx + 1}`,
-          subtitle: `Corridor ${rIdx + 1}`,
-          desc: `Planned transit corridor.`,
-          notes: `Corridor path walkthrough.`,
-          metric: `${Math.round((route.duration || 3) * 40)}m • Planned Corridor`,
+          subtitle: fromStop && toStop
+            ? `Leg: ${fromStop.badge || fromStop.title} → ${toStop.badge || toStop.title}`
+            : `Corridor ${rIdx + 1}`,
+          desc: toStop ? `Connecting path towards ${toStop.title}.` : `Planned circulation corridor.`,
+          notes: `Trace corridor "${route.title || `Corridor ${rIdx + 1}`}". Duration: ${route.duration || 3}s. Sequence position #${rIdx + 1}.`,
+          metric: route.duration ? `${Math.round(route.duration * 40)}m • Route #${rIdx + 1}` : `Route #${rIdx + 1}`,
           focusBounds: route.points,
-          activeStopId: null,
-          activeStopData: null,
+          activeStopId: toStop ? toStop.id : (fromStop ? fromStop.id : null),
+          activeStopData: toStop || fromStop || null,
           activeRouteId: route.id,
-          activeZoneId: null,
+          activeZoneId: matchingZone ? matchingZone.id : null,
           routeData: route
         });
-      }
-    });
+
+        // 3. Reveal destination stop if not yet visited
+        if (toStop && !visitedStops.has(toStop.id)) {
+          visitedStops.add(toStop.id);
+          this.steps.push({
+            index: this.steps.length,
+            type: 'stop',
+            title: toStop.title,
+            badge: toStop.badge,
+            subtitle: `Stop ${toStop.badge || visitedStops.size}`,
+            desc: toStop.desc,
+            notes: toStop.notes || `Arrival at ${toStop.title}.`,
+            metric: toStop.metric || 'Campus Hub',
+            tag: toStop.tag || 'Campus Facility',
+            focusPoint: { x: toStop.x, y: toStop.y, zoom: 1.35 },
+            activeStopId: toStop.id,
+            activeStopData: toStop,
+            activeRouteId: route.id,
+            activeZoneId: matchingZone ? matchingZone.id : null
+          });
+        }
+      });
+
+      // Include any remaining stops that were not connected to routes
+      stops.forEach(stop => {
+        if (!visitedStops.has(stop.id)) {
+          visitedStops.add(stop.id);
+          this.steps.push({
+            index: this.steps.length,
+            type: 'stop',
+            title: stop.title,
+            badge: stop.badge,
+            subtitle: `Stop ${stop.badge || visitedStops.size}`,
+            desc: stop.desc,
+            notes: stop.notes || `Overview of ${stop.title}.`,
+            metric: stop.metric || 'Key Campus Hub',
+            tag: stop.tag || 'Campus Facility',
+            focusPoint: { x: stop.x, y: stop.y, zoom: 1.35 },
+            activeStopId: stop.id,
+            activeStopData: stop,
+            activeRouteId: null,
+            activeZoneId: null
+          });
+        }
+      });
+    } else {
+      // Fallback if no routes defined: sequence through stops
+      stops.forEach(stop => {
+        this.steps.push({
+          index: this.steps.length,
+          type: 'stop',
+          title: stop.title,
+          badge: stop.badge,
+          subtitle: `Stop ${stop.badge}`,
+          desc: stop.desc,
+          notes: stop.notes || `Overview of ${stop.title}.`,
+          metric: stop.metric || 'Key Campus Hub',
+          tag: stop.tag || 'Campus Facility',
+          focusPoint: { x: stop.x, y: stop.y, zoom: 1.35 },
+          activeStopId: stop.id,
+          activeStopData: stop,
+          activeRouteId: null,
+          activeZoneId: null
+        });
+      });
+    }
 
     // Summary step
     if (this.steps.length > 2) {
@@ -145,7 +191,7 @@ export class AnimationEngine {
         type: 'summary',
         title: 'Master Plan Tour Complete',
         subtitle: 'All Routes Active',
-        desc: 'Comprehensive route network successfully mapped with all pedestrian and transit legs connected.',
+        desc: 'Comprehensive route network successfully mapped with all pedestrian and transit legs connected in sequence.',
         notes: 'Summarize key takeaways, address questions from the presentation audience.',
         metric: 'Full Campus Network',
         focusBounds: null,
