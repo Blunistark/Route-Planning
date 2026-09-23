@@ -9,6 +9,78 @@ export class ExportService {
   }
 
   // -------------------------------------------------------------
+  // Camera Math Helpers for Framing Steps
+  // -------------------------------------------------------------
+  getBaseFit(width, height) {
+    const mapImg = this.engine.bgImage;
+    if (!mapImg || !mapImg.complete || mapImg.naturalWidth <= 0) {
+      return { scale: 1, offsetX: 0, offsetY: 0, imgW: 1000, imgH: 800 };
+    }
+    const padding = 16;
+    const fitW = width - padding * 2;
+    const fitH = height - padding * 2;
+    const scale = Math.min(fitW / mapImg.naturalWidth, fitH / mapImg.naturalHeight);
+    const renderW = mapImg.naturalWidth * scale;
+    const renderH = mapImg.naturalHeight * scale;
+    const offsetX = (width - renderW) / 2;
+    const offsetY = (height - renderH) / 2;
+    return { scale, offsetX, offsetY, imgW: mapImg.naturalWidth, imgH: mapImg.naturalHeight };
+  }
+
+  // Calculate target camera view { zoom, centerX, centerY } for a given step
+  getStepCamera(step) {
+    if (!step) {
+      return { zoom: 1.0, centerX: null, centerY: null };
+    }
+
+    if (step.focusPoint) {
+      return {
+        zoom: step.focusPoint.zoom || 1.35,
+        centerX: step.focusPoint.x,
+        centerY: step.focusPoint.y
+      };
+    }
+
+    if (step.focusBounds && step.focusBounds.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      step.focusBounds.forEach(p => {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      });
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const boxW = Math.max(maxX - minX, 120);
+      const boxH = Math.max(maxY - minY, 120);
+
+      const mapImg = this.engine.bgImage;
+      const imgW = (mapImg && mapImg.naturalWidth > 0) ? mapImg.naturalWidth : 1000;
+      const imgH = (mapImg && mapImg.naturalHeight > 0) ? mapImg.naturalHeight : 800;
+
+      const scaleW = (imgW * 0.7) / boxW;
+      const scaleH = (imgH * 0.7) / boxH;
+      const targetZoom = Math.min(Math.max(Math.min(scaleW, scaleH), 1.05), 2.2);
+
+      return {
+        zoom: targetZoom,
+        centerX,
+        centerY
+      };
+    }
+
+    // Default overview / summary: centered at base zoom (1.0)
+    const mapImg = this.engine.bgImage;
+    const imgW = (mapImg && mapImg.naturalWidth > 0) ? mapImg.naturalWidth : 1000;
+    const imgH = (mapImg && mapImg.naturalHeight > 0) ? mapImg.naturalHeight : 800;
+    return {
+      zoom: 1.0,
+      centerX: imgW / 2,
+      centerY: imgH / 2
+    };
+  }
+
+  // -------------------------------------------------------------
   // 1. Formal PowerPoint (.pptx) Export
   // -------------------------------------------------------------
   async exportToPptx() {
@@ -24,8 +96,9 @@ export class ExportService {
       const slide = pptx.addSlide();
       slide.bkgd = '0F172A'; // Formal Executive Slate
 
-      // Render step snapshot with permanent labels and callouts
-      const dataUrl = await this.renderStepToImage(step, i);
+      // Render step snapshot with focused camera zoom and callouts
+      const camera = this.getStepCamera(step);
+      const dataUrl = await this.renderStepToImage(step, i, camera);
 
       // Add Map Snapshot (left/center widescreen)
       slide.addImage({
@@ -124,7 +197,7 @@ export class ExportService {
   }
 
   // -------------------------------------------------------------
-  // 2. Video Capture
+  // 2. Video Capture with Camera Zoom and Pan Transitions
   // -------------------------------------------------------------
   async recordVideo(onProgress) {
     const canvas = document.createElement('canvas');
@@ -150,18 +223,50 @@ export class ExportService {
     this.animEngine.compileSteps();
     const steps = this.animEngine.steps;
 
+    let previousCamera = this.getStepCamera(steps[0]);
+
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
+      const targetCamera = this.getStepCamera(step);
+
       if (onProgress) onProgress(i + 1, steps.length, step.title);
 
-      const frames = 40;
-      for (let f = 0; f < frames; f++) {
-        await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, f / frames);
+      // Phase 1: Smooth Camera Zoom/Pan Transition to New Slide (if moving from a previous camera state)
+      if (i > 0) {
+        const panFrames = 26; // ~400ms smooth camera glide
+        for (let p = 0; p < panFrames; p++) {
+          const t = p / panFrames;
+          // Smooth easeInOutCubic
+          const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+          const interpolatedCamera = {
+            zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
+            centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
+            centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
+          };
+
+          // Draw transitioning frame with previous step route progress completed
+          await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
+          await new Promise(r => setTimeout(r, 16));
+        }
+      }
+
+      // Phase 2: Active Step Drawing & Route Progression
+      const drawFrames = step.type === 'route' ? 44 : 28;
+      for (let f = 0; f < drawFrames; f++) {
+        const progress = f / (drawFrames - 1);
+        await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
         await new Promise(r => setTimeout(r, 16));
       }
-      for (let h = 0; h < 25; h++) {
+
+      // Phase 3: Hold step snapshot so viewer can read callout dialog and notes
+      const holdFrames = step.type === 'stop' ? 32 : 22;
+      for (let h = 0; h < holdFrames; h++) {
+        await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
         await new Promise(r => setTimeout(r, 16));
       }
+
+      previousCamera = targetCamera;
     }
 
     return new Promise((resolve) => {
@@ -181,41 +286,51 @@ export class ExportService {
   }
 
   // -------------------------------------------------------------
-  // Render Step Snapshot to Canvas
+  // Render Step Snapshot to Canvas with Zoom & Framing
   // -------------------------------------------------------------
-  async renderStepToImage(step, stepIndex) {
+  async renderStepToImage(step, stepIndex, cameraOverride = null) {
     const canvas = document.createElement('canvas');
     canvas.width = 1200;
     canvas.height = 900;
     const ctx = canvas.getContext('2d');
 
-    await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, stepIndex, 1.0);
+    const camera = cameraOverride || this.getStepCamera(step);
+    await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, stepIndex, 1.0, camera);
     return canvas.toDataURL('image/jpeg', 0.92);
   }
 
-  async drawFrameToCanvas(ctx, width, height, step, stepIndex, progress = 1.0) {
+  async drawFrameToCanvas(ctx, width, height, step, stepIndex, progress = 1.0, camera = null) {
     ctx.fillStyle = '#0F172A';
     ctx.fillRect(0, 0, width, height);
 
     const mapImg = this.engine.bgImage;
     if (mapImg && mapImg.complete && mapImg.naturalWidth > 0) {
-      const padding = 16;
-      const fitW = width - padding * 2;
-      const fitH = height - padding * 2;
-      const scale = Math.min(fitW / mapImg.naturalWidth, fitH / mapImg.naturalHeight);
+      const base = this.getBaseFit(width, height);
+      const cam = camera || this.getStepCamera(step);
+      const camZoom = cam.zoom || 1.0;
 
-      const renderW = mapImg.naturalWidth * scale;
-      const renderH = mapImg.naturalHeight * scale;
-      const offsetX = (width - renderW) / 2;
-      const offsetY = (height - renderH) / 2;
+      // Effective scale
+      const effScale = base.scale * camZoom;
+
+      // Center of viewport in map coordinate space
+      const centerMapX = cam.centerX !== null && cam.centerX !== undefined ? cam.centerX : base.imgW / 2;
+      const centerMapY = cam.centerY !== null && cam.centerY !== undefined ? cam.centerY : base.imgH / 2;
+
+      // Screen transform: Map point (centerMapX, centerMapY) maps to (width / 2, height / 2)
+      const toScreen = (pt) => ({
+        x: (width / 2) + (pt.x - centerMapX) * effScale,
+        y: (height / 2) + (pt.y - centerMapY) * effScale
+      });
 
       ctx.save();
-      ctx.drawImage(mapImg, offsetX, offsetY, renderW, renderH);
+      // Clip to inner canvas viewport with neat rounded borders
+      ctx.beginPath();
+      ctx.rect(0, 0, width, height);
+      ctx.clip();
 
-      const toScreen = (pt) => ({
-        x: offsetX + pt.x * scale,
-        y: offsetY + pt.y * scale
-      });
+      // Draw map image transformed according to camera center and zoom
+      const imgTopLeft = toScreen({ x: 0, y: 0 });
+      ctx.drawImage(mapImg, imgTopLeft.x, imgTopLeft.y, base.imgW * effScale, base.imgH * effScale);
 
       // 1. Draw Zones
       this.state.zones.forEach(zone => {
@@ -230,14 +345,14 @@ export class ExportService {
         }
         ctx.closePath();
 
-        ctx.fillStyle = isFocus ? 'rgba(22, 163, 74, 0.3)' : 'rgba(22, 163, 74, 0.15)';
+        ctx.fillStyle = isFocus ? 'rgba(22, 163, 74, 0.32)' : 'rgba(22, 163, 74, 0.15)';
         ctx.fill();
         ctx.strokeStyle = isFocus ? '#16A34A' : 'rgba(22, 163, 74, 0.6)';
-        ctx.lineWidth = isFocus ? 3 : 1.5;
+        ctx.lineWidth = isFocus ? Math.max(2, 3 * camZoom * 0.8) : Math.max(1, 1.5 * camZoom * 0.8);
         ctx.stroke();
       });
 
-      // 2. Draw Routes
+      // 2. Draw Routes (draw prior routes completed, and active route progressively)
       this.state.routes.forEach(route => {
         if (!route.points || route.points.length < 2) return;
         const isCurrentRoute = step.activeRouteId === route.id;
@@ -256,7 +371,7 @@ export class ExportService {
         }
 
         ctx.strokeStyle = route.color || '#DC2626';
-        ctx.lineWidth = (route.strokeWidth || 4) * scale * 1.4;
+        ctx.lineWidth = (route.strokeWidth || 4) * effScale * 1.35;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.stroke();
@@ -266,8 +381,8 @@ export class ExportService {
           const pEnd = toScreen(route.points[maxIndex - 1]);
           const pPrev = toScreen(route.points[maxIndex - 2]);
           const angle = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
-          const arrowLen = 10 * scale * 1.4;
-          const arrowWid = 6 * scale * 1.4;
+          const arrowLen = Math.max(10, 11 * effScale * 1.35);
+          const arrowWid = Math.max(6, 7 * effScale * 1.35);
 
           ctx.save();
           ctx.beginPath();
@@ -285,14 +400,36 @@ export class ExportService {
           ctx.fill();
           ctx.restore();
         }
+
+        // Animated traveler token indicator on active route during video
+        if (isCurrentRoute && progress > 0.05 && progress < 0.98) {
+          const curPtIndex = Math.min(maxIndex - 1, route.points.length - 1);
+          const curPt = toScreen(route.points[curPtIndex]);
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(curPt.x, curPt.y, 11 * effScale, 0, Math.PI * 2);
+          ctx.fillStyle = route.color || '#DC2626';
+          ctx.globalAlpha = 0.35;
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(curPt.x, curPt.y, 6 * effScale, 0, Math.PI * 2);
+          ctx.globalAlpha = 1.0;
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fill();
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = route.color || '#DC2626';
+          ctx.stroke();
+          ctx.restore();
+        }
       });
 
       // 3. Draw Permanent Labels
       if (this.state.permanentLabels && this.state.showPermanentLabels !== false) {
         this.state.permanentLabels.forEach(lbl => {
           const pt = toScreen({ x: lbl.x, y: lbl.y });
-          const fontName = lbl.fontFamily || 'Segoe UI';
-          const fontSize = Math.max(9, Math.round((lbl.fontSize || 11) * scale * 1.1));
+          const fontName = lbl.fontFamily || 'Plus Jakarta Sans';
+          const fontSize = Math.max(10, Math.round((lbl.fontSize || 11) * effScale * 1.15));
           ctx.font = `bold ${fontSize}px ${fontName}, sans-serif`;
 
           const lines = String(lbl.text || '').split('\n');
@@ -347,41 +484,43 @@ export class ExportService {
         const pt = toScreen({ x: stop.x, y: stop.y });
         const isActive = step.activeStopId === stop.id;
 
+        const pinRadius = isActive ? Math.max(14, 16 * camZoom * 0.9) : Math.max(10, 12 * camZoom * 0.9);
+
         // Badge circle
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, isActive ? 15 : 12, 0, Math.PI * 2);
+        ctx.arc(pt.x, pt.y, pinRadius, 0, Math.PI * 2);
         ctx.fillStyle = stop.color || '#DC2626';
         ctx.fill();
-        ctx.lineWidth = isActive ? 3 : 2;
+        ctx.lineWidth = isActive ? 3.5 : 2;
         ctx.strokeStyle = '#FFFFFF';
         ctx.stroke();
 
         // Badge Number text
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = `bold ${isActive ? 12 : 10}px Segoe UI, sans-serif`;
+        ctx.font = `bold ${Math.round(pinRadius * 0.9)}px 'Plus Jakarta Sans', Segoe UI, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(stop.badge || `${idx + 1}`, pt.x, pt.y);
 
         // 5. Draw Callout Dialog Box on Active Stop
         if (isActive && step.type === 'stop' && this.state.showDialogOnFocus !== false) {
-          const dialogW = 210;
-          const dialogH = 75;
+          const dialogW = 220;
+          const dialogH = 80;
           const dialogX = pt.x - dialogW / 2;
-          const dialogY = pt.y - 30 - dialogH;
+          const dialogY = pt.y - pinRadius - 16 - dialogH;
 
           ctx.save();
           ctx.fillStyle = '#1E293B';
-          ctx.strokeStyle = '#475569';
+          ctx.strokeStyle = '#64748B';
           ctx.lineWidth = 1.5;
           ctx.fillRect(dialogX, dialogY, dialogW, dialogH);
           ctx.strokeRect(dialogX, dialogY, dialogW, dialogH);
 
           // Arrow tip
           ctx.beginPath();
-          ctx.moveTo(pt.x - 7, dialogY + dialogH);
-          ctx.lineTo(pt.x + 7, dialogY + dialogH);
-          ctx.lineTo(pt.x, dialogY + dialogH + 8);
+          ctx.moveTo(pt.x - 8, dialogY + dialogH);
+          ctx.lineTo(pt.x + 8, dialogY + dialogH);
+          ctx.lineTo(pt.x, dialogY + dialogH + 10);
           ctx.closePath();
           ctx.fillStyle = '#1E293B';
           ctx.fill();
@@ -389,23 +528,23 @@ export class ExportService {
 
           // Header
           ctx.fillStyle = '#FFFFFF';
-          ctx.font = 'bold 11px Segoe UI, sans-serif';
+          ctx.font = 'bold 12px "Plus Jakarta Sans", Segoe UI, sans-serif';
           ctx.textAlign = 'left';
-          ctx.fillText(stop.title, dialogX + 8, dialogY + 16);
+          ctx.fillText(stop.title, dialogX + 10, dialogY + 18);
 
           // Description (multiline truncated)
           ctx.fillStyle = '#CBD5E1';
-          ctx.font = '9px Segoe UI, sans-serif';
+          ctx.font = '10px "Plus Jakarta Sans", Segoe UI, sans-serif';
           const desc = stop.desc || '';
-          ctx.fillText(desc.substring(0, 36), dialogX + 8, dialogY + 34);
+          ctx.fillText(desc.substring(0, 36), dialogX + 10, dialogY + 38);
           if (desc.length > 36) {
-            ctx.fillText(desc.substring(36, 72) + '...', dialogX + 8, dialogY + 48);
+            ctx.fillText(desc.substring(36, 72) + '...', dialogX + 10, dialogY + 52);
           }
 
           // Tag
           ctx.fillStyle = '#38BDF8';
-          ctx.font = 'bold 8px Segoe UI, sans-serif';
-          ctx.fillText(stop.metric || 'Key Hub', dialogX + 8, dialogY + 64);
+          ctx.font = 'bold 9px "Plus Jakarta Sans", Segoe UI, sans-serif';
+          ctx.fillText(stop.metric || 'Key Hub', dialogX + 10, dialogY + 68);
           ctx.restore();
         }
       });
