@@ -38,6 +38,7 @@ export class CanvasEngine {
   }
 
   setDimensions(width, height) {
+    if (!width || !height || width <= 0 || height <= 0) return;
     this.mapWidth = width;
     this.mapHeight = height;
     this.stage.style.width = `${width}px`;
@@ -48,6 +49,9 @@ export class CanvasEngine {
   }
 
   initEvents() {
+    this.pointerDownPos = null;
+    this.hasMovedSignificantly = false;
+
     // Wheel zoom
     this.container.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -64,6 +68,9 @@ export class CanvasEngine {
       // Ignore if clicking on interactive controls (hud buttons, pins, etc.)
       if (e.target.closest('.hud-controls') || e.target.closest('.instruction-pill')) return;
 
+      this.pointerDownPos = { x: e.clientX, y: e.clientY };
+      this.hasMovedSignificantly = false;
+
       if (this.mode === 'pan' || e.button === 1 || e.button === 2 || e.shiftKey || e.spaceKey) {
         this.isPanning = true;
         this.dragStartX = e.clientX;
@@ -71,12 +78,18 @@ export class CanvasEngine {
         this.initialPanX = this.panX;
         this.initialPanY = this.panY;
         this.container.classList.add('grabbing');
-        this.container.setPointerCapture(e.pointerId);
+        try { this.container.setPointerCapture(e.pointerId); } catch (_) {}
       }
     });
 
     // Pointer move
     this.container.addEventListener('pointermove', (e) => {
+      if (this.pointerDownPos) {
+        if (Math.hypot(e.clientX - this.pointerDownPos.x, e.clientY - this.pointerDownPos.y) > 6) {
+          this.hasMovedSignificantly = true;
+        }
+      }
+
       if (this.isPanning) {
         const dx = e.clientX - this.dragStartX;
         const dy = e.clientY - this.dragStartY;
@@ -97,17 +110,31 @@ export class CanvasEngine {
 
     // Canvas Click (for placing stops, drawing paths/zones)
     this.container.addEventListener('click', (e) => {
-      // If was dragging significantly, don't trigger click
-      if (Math.abs(e.clientX - this.dragStartX) > 4 || Math.abs(e.clientY - this.dragStartY) > 4) {
-        return;
-      }
       if (e.target.closest('.hud-controls') || e.target.closest('.instruction-pill')) return;
 
+      // If user moved/dragged significantly, don't trigger click action
+      if (this.hasMovedSignificantly) {
+        this.hasMovedSignificantly = false;
+        return;
+      }
+
+      if (this.pointerDownPos) {
+        const dist = Math.hypot(e.clientX - this.pointerDownPos.x, e.clientY - this.pointerDownPos.y);
+        this.pointerDownPos = null;
+        if (dist > 6) return;
+      }
+
       const coords = this.screenToMap(e.clientX, e.clientY);
-      // Check if within bounds
-      if (coords.x >= 0 && coords.x <= this.mapWidth && coords.y >= 0 && coords.y <= this.mapHeight) {
+      // Check if within bounds with small margin, clamp to map boundaries
+      const margin = 30;
+      if (coords.x >= -margin && coords.x <= this.mapWidth + margin &&
+          coords.y >= -margin && coords.y <= this.mapHeight + margin) {
+        const clampedCoords = {
+          x: Math.max(0, Math.min(this.mapWidth, coords.x)),
+          y: Math.max(0, Math.min(this.mapHeight, coords.y))
+        };
         if (this.onCanvasClick) {
-          this.onCanvasClick(coords, e);
+          this.onCanvasClick(clampedCoords, e);
         }
       }
     });
@@ -121,7 +148,7 @@ export class CanvasEngine {
   setMode(mode) {
     this.mode = mode;
     this.container.classList.remove('crosshair', 'grabbing');
-    if (mode === 'place' || mode === 'path' || mode === 'zone') {
+    if (mode === 'place' || mode === 'label' || mode === 'path' || mode === 'zone') {
       this.container.classList.add('crosshair');
     }
   }

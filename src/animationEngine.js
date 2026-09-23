@@ -78,10 +78,21 @@ export class AnimationEngine {
       // Step: Trace route to next stop
       if (idx < stops.length - 1) {
         const nextStop = stops[idx + 1];
-        const matchingRoute = routes.find(
-          r => (r.fromStopId === stop.id && r.toStopId === nextStop.id) ||
-               (r.points && r.points.length > 1)
-        ) || routes[idx];
+        let matchingRoute = routes.find(r => r.fromStopId === stop.id && r.toStopId === nextStop.id);
+        if (!matchingRoute) {
+          // Check proximity to stop and nextStop
+          matchingRoute = routes.find(r => {
+            if (!r.points || r.points.length < 2) return false;
+            const startP = r.points[0];
+            const endP = r.points[r.points.length - 1];
+            const dStart = Math.hypot(startP.x - stop.x, startP.y - stop.y);
+            const dEnd = Math.hypot(endP.x - nextStop.x, endP.y - nextStop.y);
+            return (dStart < 120 && dEnd < 120);
+          });
+        }
+        if (!matchingRoute && routes[idx]) {
+          matchingRoute = routes[idx];
+        }
 
         if (matchingRoute) {
           const matchingZone = zones.find(z => z.points && z.points.some(p => Math.hypot(p.x - nextStop.x, p.y - nextStop.y) < 200));
@@ -93,7 +104,7 @@ export class AnimationEngine {
             subtitle: `Transit Leg: ${stop.badge} → ${nextStop.badge}`,
             desc: `Connecting corridor towards ${nextStop.title}.`,
             notes: `Trace corridor from ${stop.title} to ${nextStop.title}. Point out safety features and circulation efficiency.`,
-            metric: matchingRoute.duration ? `${matchingRoute.duration * 40}m • Planned Link` : 'Connecting Walkway',
+            metric: matchingRoute.duration ? `${Math.round(matchingRoute.duration * 40)}m • Planned Link` : 'Connecting Walkway',
             focusBounds: matchingRoute.points,
             activeStopId: nextStop.id,
             activeStopData: nextStop,
@@ -102,6 +113,28 @@ export class AnimationEngine {
             routeData: matchingRoute
           });
         }
+      }
+    });
+
+    // Also include any standalone routes not already featured in steps
+    const includedRouteIds = new Set(this.steps.filter(s => s.activeRouteId).map(s => s.activeRouteId));
+    routes.forEach((route, rIdx) => {
+      if (!includedRouteIds.has(route.id) && route.points && route.points.length >= 2) {
+        this.steps.push({
+          index: this.steps.length,
+          type: 'route',
+          title: route.title || `Route Corridor ${rIdx + 1}`,
+          subtitle: `Corridor ${rIdx + 1}`,
+          desc: `Planned transit corridor.`,
+          notes: `Corridor path walkthrough.`,
+          metric: `${Math.round((route.duration || 3) * 40)}m • Planned Corridor`,
+          focusBounds: route.points,
+          activeStopId: null,
+          activeStopData: null,
+          activeRouteId: route.id,
+          activeZoneId: null,
+          routeData: route
+        });
       }
     });
 

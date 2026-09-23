@@ -11,9 +11,12 @@ export class DrawingTools {
     this.drawingType = null; // 'path' or 'zone'
     this.activePoints = [];
 
-    // Dragging waypoint handle state
-    this.draggingWaypoint = null;
+    // Dragging state
     this.draggingLabel = null;
+
+    // Callbacks to notify UI when tool mode completes
+    this.onFinishMode = null;
+    this.onCancelMode = null;
 
     // UI elements
     this.instructionPill = document.getElementById('drawingInstruction');
@@ -27,8 +30,15 @@ export class DrawingTools {
   }
 
   initUI() {
-    this.btnFinish.addEventListener('click', () => this.finishDrawing());
-    this.btnCancel.addEventListener('click', () => this.cancelDrawing());
+    this.btnFinish.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.finishDrawing();
+    });
+
+    this.btnCancel.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.cancelDrawing();
+    });
 
     // Keyboard shortcuts
     window.addEventListener('keydown', (e) => {
@@ -38,18 +48,31 @@ export class DrawingTools {
       }
     });
 
-    // Pointer move listener
+    // Double-click on canvas to finish drawing route or zone
+    this.engine.container.addEventListener('dblclick', (e) => {
+      if (this.isDrawing && this.activePoints.length >= 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.finishDrawing();
+      }
+    });
+
+    // Pointer move listener for route preview or dragging permanent label
     this.engine.container.addEventListener('pointermove', (e) => {
       if (this.isDrawing && this.activePoints.length > 0) {
         const coords = this.engine.screenToMap(e.clientX, e.clientY);
         this.renderDrawingPreview(coords);
       } else if (this.draggingLabel) {
         const coords = this.engine.screenToMap(e.clientX, e.clientY);
-        const label = this.state.permanentLabels.find(l => l.id === this.draggingLabel);
+        const label = this.state.permanentLabels?.find(l => l.id === this.draggingLabel);
         if (label) {
           label.x = coords.x;
           label.y = coords.y;
-          this.onUpdate();
+          const el = document.querySelector(`[data-label-id="${label.id}"]`);
+          if (el) {
+            el.style.left = `${coords.x}px`;
+            el.style.top = `${coords.y}px`;
+          }
         }
       }
     });
@@ -57,6 +80,7 @@ export class DrawingTools {
     window.addEventListener('pointerup', () => {
       if (this.draggingLabel) {
         this.draggingLabel = null;
+        this.onUpdate();
       }
     });
   }
@@ -94,7 +118,6 @@ export class DrawingTools {
 
     this.state.stops.push(newStop);
     this.state.selectedStopId = newStop.id;
-    this.onUpdate();
 
     // Auto-link to previous stop if available
     if (this.state.stops.length >= 2) {
@@ -115,20 +138,35 @@ export class DrawingTools {
         ]
       };
       this.state.routes.push(newRoute);
-      this.onUpdate();
+    }
+
+    this.onUpdate();
+
+    // Switch to stops tab and focus the title input for editing
+    const tabStops = document.querySelector('.tab-btn[data-tab="stops"]');
+    if (tabStops) tabStops.click();
+    setTimeout(() => {
+      const titleInput = document.getElementById('editStopTitle');
+      if (titleInput) {
+        titleInput.focus();
+        titleInput.select();
+      }
+    }, 60);
+
+    // Return to pan tool
+    if (this.onFinishMode) {
+      this.onFinishMode();
     }
   }
 
   // --- Add Permanent Map Label ---
   addPermanentLabel(coords) {
-    const labelText = prompt('Enter permanent label text (e.g. Football Ground, North Gate, Dibburu Road):', 'Reference Landmark');
-    if (!labelText || !labelText.trim()) return;
-
     if (!this.state.permanentLabels) this.state.permanentLabels = [];
 
+    const nextCount = this.state.permanentLabels.length + 1;
     const newLabel = {
       id: `label-${Date.now()}`,
-      text: labelText.trim(),
+      text: `Landmark ${nextCount}`,
       x: coords.x,
       y: coords.y,
       style: 'default' // 'default', 'dark-style', 'road-style'
@@ -137,6 +175,25 @@ export class DrawingTools {
     this.state.permanentLabels.push(newLabel);
     this.state.selectedLabelId = newLabel.id;
     this.onUpdate();
+
+    // Switch to labels tab and focus input
+    const tabLabels = document.querySelector('.tab-btn[data-tab="labels"]');
+    if (tabLabels) tabLabels.click();
+    setTimeout(() => {
+      const card = document.querySelector(`[data-label-card-id="${newLabel.id}"]`);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        const input = card.querySelector('.edit-label-text');
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      }
+    }, 60);
+
+    if (this.onFinishMode) {
+      this.onFinishMode();
+    }
   }
 
   // --- Route Path Drawing ---
@@ -144,15 +201,27 @@ export class DrawingTools {
     this.isDrawing = true;
     this.drawingType = 'path';
     this.activePoints = [];
-    this.showInstruction('Click on map to place route waypoints. Press Enter or ✓ when done.');
+    this.showInstruction('Click map to place route waypoints. Double-click or press ✓ Done to complete.');
   }
 
   handlePathClick(coords) {
     if (!this.isDrawing) {
       this.startPathDrawing();
     }
+
+    // Ignore duplicate clicks on the exact same point
+    if (this.activePoints.length > 0) {
+      const last = this.activePoints[this.activePoints.length - 1];
+      if (Math.hypot(last.x - coords.x, last.y - coords.y) < 4) {
+        return;
+      }
+    }
+
     this.activePoints.push({ x: coords.x, y: coords.y });
     this.renderDrawingPreview();
+
+    // Update instruction with point count
+    this.showInstruction(`Route points: ${this.activePoints.length}. Click next waypoint or press ✓ Done when finished.`);
   }
 
   // --- Zone Boundary Drawing ---
@@ -160,15 +229,26 @@ export class DrawingTools {
     this.isDrawing = true;
     this.drawingType = 'zone';
     this.activePoints = [];
-    this.showInstruction('Click corners to outline boundary zone. Press Enter or ✓ when done.');
+    this.showInstruction('Click corners to outline boundary zone. Double-click or press ✓ Done to complete.');
   }
 
   handleZoneClick(coords) {
     if (!this.isDrawing) {
       this.startZoneDrawing();
     }
+
+    // Ignore duplicate clicks on the exact same point
+    if (this.activePoints.length > 0) {
+      const last = this.activePoints[this.activePoints.length - 1];
+      if (Math.hypot(last.x - coords.x, last.y - coords.y) < 4) {
+        return;
+      }
+    }
+
     this.activePoints.push({ x: coords.x, y: coords.y });
     this.renderDrawingPreview();
+
+    this.showInstruction(`Zone corners: ${this.activePoints.length}. Click next corner or press ✓ Done when finished.`);
   }
 
   renderDrawingPreview(currentCursor = null) {
@@ -206,11 +286,24 @@ export class DrawingTools {
     }
 
     if (this.drawingType === 'path') {
+      // Find closest stops to start and end of path if near
+      let fromStopId = null;
+      let toStopId = null;
+      if (this.state.stops && this.state.stops.length > 0) {
+        const startP = this.activePoints[0];
+        const endP = this.activePoints[this.activePoints.length - 1];
+        const nearStart = this.state.stops.find(s => Math.hypot(s.x - startP.x, s.y - startP.y) < 90);
+        const nearEnd = this.state.stops.find(s => s.id !== nearStart?.id && Math.hypot(s.x - endP.x, s.y - endP.y) < 90);
+        if (nearStart) fromStopId = nearStart.id;
+        if (nearEnd) toStopId = nearEnd.id;
+      }
+
+      const routeNum = this.state.routes.length + 1;
       const newRoute = {
         id: `route-${Date.now()}`,
-        fromStopId: null,
-        toStopId: null,
-        title: `Route Corridor ${this.state.routes.length + 1}`,
+        fromStopId: fromStopId,
+        toStopId: toStopId,
+        title: `Route Corridor ${routeNum}`,
         color: '#DC2626',
         strokeWidth: 4,
         style: 'formal',
@@ -219,20 +312,36 @@ export class DrawingTools {
         points: [...this.activePoints]
       };
       this.state.routes.push(newRoute);
+
+      const tabRoutes = document.querySelector('.tab-btn[data-tab="routes"]');
+      if (tabRoutes) tabRoutes.click();
     } else if (this.drawingType === 'zone') {
+      const zoneNum = this.state.zones.length + 1;
       const newZone = {
         id: `zone-${Date.now()}`,
-        title: `Zone Boundary ${this.state.zones.length + 1}`,
+        title: `Zone Boundary ${zoneNum}`,
         color: '#16A34A',
         fillOpacity: 0.18,
         strokeWidth: 2,
         points: [...this.activePoints]
       };
       this.state.zones.push(newZone);
+
+      const tabZones = document.querySelector('.tab-btn[data-tab="zones"]');
+      if (tabZones) tabZones.click();
     }
 
-    this.cancelDrawing();
+    this.isDrawing = false;
+    this.drawingType = null;
+    this.activePoints = [];
+    this.activePathLayer.innerHTML = '';
+    this.hideInstruction();
+
     this.onUpdate();
+
+    if (this.onFinishMode) {
+      this.onFinishMode();
+    }
   }
 
   cancelDrawing() {
@@ -241,6 +350,10 @@ export class DrawingTools {
     this.activePoints = [];
     this.activePathLayer.innerHTML = '';
     this.hideInstruction();
+
+    if (this.onCancelMode) {
+      this.onCancelMode();
+    }
   }
 
   showInstruction(text) {
@@ -253,7 +366,7 @@ export class DrawingTools {
   }
 
   buildSmoothSvgPath(points) {
-    if (points.length === 0) return '';
+    if (!points || points.length === 0) return '';
     if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
     if (points.length === 2) {
       return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;

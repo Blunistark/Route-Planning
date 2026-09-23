@@ -1,0 +1,6 @@
+{
+  "name": "RouteCraft Studio",
+  "description": "Interactive Campus Route Planning and PPT On-Click Animation Studio",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

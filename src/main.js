@@ -121,11 +121,20 @@ function initApp() {
 
   bindUIEvents();
 
-  mapImage.onload = () => {
-    canvasEngine.setDimensions(mapImage.naturalWidth, mapImage.naturalHeight);
-    canvasEngine.fitToScreen(40);
+  drawingTools.onFinishMode = () => {
+    setTool('pan', toolPan);
   };
-  if (mapImage.complete) {
+  drawingTools.onCancelMode = () => {
+    setTool('pan', toolPan);
+  };
+
+  mapImage.onload = () => {
+    if (mapImage.naturalWidth > 0 && mapImage.naturalHeight > 0) {
+      canvasEngine.setDimensions(mapImage.naturalWidth, mapImage.naturalHeight);
+      canvasEngine.fitToScreen(40);
+    }
+  };
+  if (mapImage.complete && mapImage.naturalWidth > 0) {
     canvasEngine.setDimensions(mapImage.naturalWidth || 738, mapImage.naturalHeight || 1454);
     setTimeout(() => canvasEngine.fitToScreen(40), 100);
   }
@@ -136,15 +145,19 @@ function initApp() {
   animationEngine.goToStep(0, false);
 }
 
+let setTool = null;
+
 function bindUIEvents() {
   // Tool switching
-  const setTool = (mode, activeBtn) => {
+  setTool = (mode, activeBtn) => {
     canvasEngine.setMode(mode);
     [toolPan, toolPlace, toolLabel, toolPath, toolZone].forEach(btn => btn.classList.remove('active'));
-    activeBtn.classList.add('active');
+    if (activeBtn) activeBtn.classList.add('active');
 
     if (mode === 'path') drawingTools.startPathDrawing();
     else if (mode === 'zone') drawingTools.startZoneDrawing();
+    else if (mode === 'place') drawingTools.showInstruction('Click on map to place a new Stop. Press Esc to cancel.');
+    else if (mode === 'label') drawingTools.showInstruction('Click on map to place a permanent Label. Press Esc to cancel.');
     else drawingTools.cancelDrawing();
   };
 
@@ -153,6 +166,34 @@ function bindUIEvents() {
   toolLabel.addEventListener('click', () => setTool('label', toolLabel));
   toolPath.addEventListener('click', () => setTool('path', toolPath));
   toolZone.addEventListener('click', () => setTool('zone', toolZone));
+
+  // Global keyboard shortcuts (when not typing in form controls)
+  window.addEventListener('keydown', (e) => {
+    const activeEl = document.activeElement;
+    const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
+    if (isTyping || presentationMode.isActive) return;
+
+    const key = e.key.toLowerCase();
+    if (key === 'v') {
+      setTool('pan', toolPan);
+    } else if (key === 'p') {
+      setTool('place', toolPlace);
+    } else if (key === 'l') {
+      setTool('label', toolLabel);
+    } else if (key === 'r') {
+      setTool('path', toolPath);
+    } else if (key === 'z') {
+      setTool('zone', toolZone);
+    } else if (key === 'f') {
+      canvasEngine.fitToScreen(40);
+    } else if (key === '1') {
+      canvasEngine.resetZoom();
+    } else if (key === '+' || key === '=') {
+      canvasEngine.zoomIn();
+    } else if (key === '-' || key === '_') {
+      canvasEngine.zoomOut();
+    }
+  });
 
   // Zoom HUD
   btnZoomIn.addEventListener('click', () => canvasEngine.zoomIn());
@@ -214,9 +255,17 @@ function bindUIEvents() {
   btnPresent.addEventListener('click', () => presentationMode.enter());
   btnPresentationFullscreen.addEventListener('click', () => presentationMode.enter());
 
+  function syncAppStateReferences() {
+    drawingTools.state = appState;
+    animationEngine.state = appState;
+    presentationMode.state = appState;
+    exportService.state = appState;
+  }
+
   // Reset to Sample Plan
   btnSampleTour.addEventListener('click', () => {
     appState = JSON.parse(JSON.stringify(sampleCampusPlan));
+    syncAppStateReferences();
     projectTitleInput.value = appState.title;
     renderAllLayers();
     updateSidebarLists();
@@ -277,6 +326,7 @@ function bindUIEvents() {
     reader.onload = (evt) => {
       try {
         appState = JSON.parse(evt.target.result);
+        syncAppStateReferences();
         projectTitleInput.value = appState.title || 'Campus Presentation';
         renderAllLayers();
         updateSidebarLists();
@@ -393,15 +443,22 @@ function renderPermanentLabels() {
       drawingTools.draggingLabel = lbl.id;
     });
 
-    // Double click to rename label
+    // Double click to edit label in sidebar
     el.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      const updated = prompt('Edit permanent label text:', lbl.text);
-      if (updated && updated.trim()) {
-        lbl.text = updated.trim();
-        renderPermanentLabels();
-        updateSidebarLists();
-      }
+      const tabLabels = document.querySelector('.tab-btn[data-tab="labels"]');
+      if (tabLabels) tabLabels.click();
+      setTimeout(() => {
+        const card = document.querySelector(`[data-label-card-id="${lbl.id}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          const input = card.querySelector('.edit-label-text');
+          if (input) {
+            input.focus();
+            input.select();
+          }
+        }
+      }, 50);
     });
 
     stagePermanentLabelsLayer.appendChild(el);
@@ -591,6 +648,7 @@ function updateSidebarLists() {
   appState.permanentLabels.forEach(lbl => {
     const card = document.createElement('div');
     card.className = 'item-card';
+    card.setAttribute('data-label-card-id', lbl.id);
 
     card.innerHTML = `
       <div class="item-card-header">
@@ -603,7 +661,7 @@ function updateSidebarLists() {
         </div>
       </div>
       <div class="form-group" style="margin-top:6px;">
-        <input type="text" class="form-input edit-label-text" value="${lbl.text}">
+        <input type="text" class="form-input edit-label-text" value="${lbl.text}" placeholder="Label text">
       </div>
       <div class="item-card-footer">
         <span>📍 X: ${lbl.x}, Y: ${lbl.y}</span>
@@ -614,6 +672,11 @@ function updateSidebarLists() {
         </select>
       </div>
     `;
+
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.delete') || e.target.closest('input') || e.target.closest('select')) return;
+      canvasEngine.panTo(lbl.x, lbl.y, 1.5, 450);
+    });
 
     card.querySelector('.edit-label-text').addEventListener('input', (e) => {
       lbl.text = e.target.value;
@@ -639,25 +702,48 @@ function updateSidebarLists() {
   // 3. Routes list
   const routesList = document.getElementById('routesList');
   routesList.innerHTML = '';
-  appState.routes.forEach(route => {
+  appState.routes.forEach((route, rIdx) => {
     const card = document.createElement('div');
     card.className = 'item-card';
+    card.setAttribute('data-route-card-id', route.id);
 
     card.innerHTML = `
       <div class="item-card-header">
         <div class="item-badge-title">
           <span style="color:${route.color || '#DC2626'}">━━</span>
-          <span class="item-card-title">${route.title || 'Route Corridor'}</span>
+          <span class="item-card-title">${route.title || `Route Corridor ${rIdx + 1}`}</span>
         </div>
         <div class="item-card-actions">
           <button class="icon-btn-subtle delete" title="Delete route">✕</button>
         </div>
       </div>
+      <div class="form-group" style="margin-top:6px;">
+        <input type="text" class="form-input edit-route-title" value="${route.title || `Route Corridor ${rIdx + 1}`}">
+      </div>
       <div class="item-card-footer">
-        <span>Style: <strong>Formal</strong></span>
-        <span>Duration: <strong>${route.duration || 2.8}s</strong></span>
+        <span>Points: <strong>${route.points ? route.points.length : 0}</strong></span>
+        <span>Duration: <input type="number" class="form-input edit-route-duration" style="width:50px; display:inline-block; padding:1px 4px; font-size:0.75rem;" step="0.5" min="1" max="10" value="${route.duration || 3}">s</span>
       </div>
     `;
+
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.delete') || e.target.closest('input')) return;
+      if (route.points && route.points.length >= 2) {
+        canvasEngine.fitBounds(route.points, 80, 500);
+      }
+    });
+
+    card.querySelector('.edit-route-title').addEventListener('input', (e) => {
+      route.title = e.target.value;
+      card.querySelector('.item-card-title').textContent = route.title;
+      animationEngine.compileSteps();
+      renderTimelinePills();
+    });
+
+    card.querySelector('.edit-route-duration').addEventListener('change', (e) => {
+      route.duration = parseFloat(e.target.value) || 3;
+      animationEngine.compileSteps();
+    });
 
     card.querySelector('.delete').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -674,24 +760,40 @@ function updateSidebarLists() {
   // 4. Zones list
   const zonesList = document.getElementById('zonesList');
   zonesList.innerHTML = '';
-  appState.zones.forEach(zone => {
+  appState.zones.forEach((zone, zIdx) => {
     const card = document.createElement('div');
     card.className = 'item-card';
+    card.setAttribute('data-zone-card-id', zone.id);
 
     card.innerHTML = `
       <div class="item-card-header">
         <div class="item-badge-title">
           <span style="color:${zone.color || '#16A34A'}">⬡</span>
-          <span class="item-card-title">${zone.title || 'Boundary Zone'}</span>
+          <span class="item-card-title">${zone.title || `Boundary Zone ${zIdx + 1}`}</span>
         </div>
         <div class="item-card-actions">
           <button class="icon-btn-subtle delete" title="Delete zone">✕</button>
         </div>
       </div>
+      <div class="form-group" style="margin-top:6px;">
+        <input type="text" class="form-input edit-zone-title" value="${zone.title || `Boundary Zone ${zIdx + 1}`}">
+      </div>
       <div class="item-card-footer">
         <span>Perimeter Points: ${zone.points ? zone.points.length : 0}</span>
       </div>
     `;
+
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.delete') || e.target.closest('input')) return;
+      if (zone.points && zone.points.length >= 3) {
+        canvasEngine.fitBounds(zone.points, 80, 500);
+      }
+    });
+
+    card.querySelector('.edit-zone-title').addEventListener('input', (e) => {
+      zone.title = e.target.value;
+      card.querySelector('.item-card-title').textContent = zone.title;
+    });
 
     card.querySelector('.delete').addEventListener('click', (e) => {
       e.stopPropagation();
