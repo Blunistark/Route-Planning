@@ -869,7 +869,7 @@ export class ExportService {
         if (isActive && step.type === 'stop' && this.state.showDialogOnFocus !== false) {
           // Generous executive callout dimensions for high legibility in video & presentation
           const dialogW = 380;
-          const dialogH = 132;
+          const dialogH = 98;
 
           // Safe positioning with boundary clamping
           let dialogX = Math.round(pt.x - dialogW / 2);
@@ -1036,43 +1036,6 @@ export class ExportService {
             lines.forEach((l, lIdx) => {
               ctx.fillText(l, dialogX + 16, dialogY + 65 + lIdx * lineSpacing);
             });
-
-            // Metadata Tags Row at bottom
-            const tagY = dialogY + dialogH - 24;
-            const primaryMetric = stop.metric || 'Presentation Hub';
-
-            // Tag 1 (Metric pill)
-            ctx.font = 'bold 11.5px "Plus Jakarta Sans", Segoe UI, sans-serif';
-            const tag1Width = ctx.measureText(primaryMetric).width + 16;
-
-            roundRect(dialogX + 16, tagY, tag1Width, 20, 4);
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-            ctx.fill();
-            ctx.strokeStyle = '#0284C7';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-
-            ctx.fillStyle = '#38BDF8';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(primaryMetric, dialogX + 16 + tag1Width / 2, tagY + 10);
-
-            // Optional Tag 2 (Facility/Category) if space permits
-            if (stop.tag && dialogW - (dialogX + 16 + tag1Width + 12) > 90) {
-              const secondaryTag = stop.tag;
-              const tag2Width = ctx.measureText(secondaryTag).width + 16;
-              const tag2X = dialogX + 16 + tag1Width + 8;
-
-              roundRect(tag2X, tagY, tag2Width, 20, 4);
-              ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-              ctx.fill();
-              ctx.strokeStyle = '#475569';
-              ctx.lineWidth = 1;
-              ctx.stroke();
-
-              ctx.fillStyle = '#94A3B8';
-              ctx.fillText(secondaryTag, tag2X + tag2Width / 2, tagY + 10);
-            }
 
             ctx.restore();
           }

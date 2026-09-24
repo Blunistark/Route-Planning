@@ -141,12 +141,12 @@ export class DrawingTools {
       id: `stop-${Date.now()}`,
       badge: nextBadge,
       title: `Campus Stop ${nextBadge}`,
-      desc: `Formal presentation stop ${nextBadge}.`,
+      desc: `Stop ${nextBadge} description.`,
       x: coords.x,
       y: coords.y,
       color: chosenColor,
-      metric: 'Presentation Point',
-      tag: 'Campus Node',
+      metric: '',
+      tag: '',
       notes: `Notes for stop ${nextBadge}.`
     };
 

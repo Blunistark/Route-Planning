@@ -145,6 +145,14 @@ export class PresentationMode {
     }
 
     this.stepType.textContent = (stepData.type || 'STEP').toUpperCase();
-    this.metricTag.textContent = stepData.metric || 'Presentation Point';
+    if (this.metricTag) {
+      if (stepData.metric) {
+        this.metricTag.textContent = stepData.metric;
+        this.metricTag.classList.remove('hidden');
+      } else {
+        this.metricTag.textContent = '';
+        this.metricTag.classList.add('hidden');
+      }
+    }
   }
 }

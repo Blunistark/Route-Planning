@@ -21,8 +21,6 @@ export class AnimationEngine {
     this.calloutTitle = document.getElementById('calloutTitle');
     this.calloutBadgeNum = document.getElementById('calloutBadgeNum');
     this.calloutDesc = document.getElementById('calloutDesc');
-    this.calloutTag1 = document.getElementById('calloutTag1');
-    this.calloutTag2 = document.getElementById('calloutTag2');
 
     // Stage Node Note Callout (for notes on particular nodes when animation starts / traces)
     this.nodeNoteCallout = document.getElementById('stageNodeNoteCallout');
@@ -349,8 +347,6 @@ export class AnimationEngine {
     this.calloutBadgeNum.textContent = stop.badge || '●';
     this.calloutBadgeNum.style.background = stop.color || '#DC2626';
     this.calloutDesc.textContent = stop.desc || '';
-    this.calloutTag1.textContent = stop.metric || 'Campus Hub';
-    this.calloutTag2.textContent = stop.tag || 'Formal Facility';
 
     this.calloutDialog.classList.remove('hidden');
   }
