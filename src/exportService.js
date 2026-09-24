@@ -759,51 +759,213 @@ export class ExportService {
 
         // 5. Draw Callout Dialog Box on Active Stop with smooth opacity fade-in
         if (isActive && step.type === 'stop' && this.state.showDialogOnFocus !== false) {
-          const dialogW = 220;
-          const dialogH = 80;
-          const dialogX = pt.x - dialogW / 2;
-          const dialogY = pt.y - pinRadius - 16 - dialogH;
+          // Generous executive callout dimensions for high legibility in video & presentation
+          const dialogW = 380;
+          const dialogH = 132;
+
+          // Safe positioning with boundary clamping
+          let dialogX = Math.round(pt.x - dialogW / 2);
+          if (dialogX < 24) dialogX = 24;
+          if (dialogX + dialogW > width - 24) dialogX = width - dialogW - 24;
+
+          let placeAbove = true;
+          let dialogY = Math.round(pt.y - pinRadius - 18 - dialogH);
+          if (dialogY < 24) {
+            dialogY = Math.round(pt.y + pinRadius + 20);
+            placeAbove = false;
+          }
+
+          // Arrow anchor point aligned to pin, clamped within box
+          const arrowX = Math.max(dialogX + 24, Math.min(dialogX + dialogW - 24, pt.x));
 
           // Smooth fade-in during active focus phase (hidden during camera pan glide)
-          const dialogAlpha = Math.min(1.0, Math.max(0.0, (progress - 0.15) / 0.5));
+          const dialogAlpha = Math.min(1.0, Math.max(0.0, (progress - 0.12) / 0.45));
           if (dialogAlpha > 0.01) {
             ctx.save();
             ctx.globalAlpha = dialogAlpha;
-            ctx.fillStyle = '#1E293B';
-            ctx.strokeStyle = '#64748B';
-            ctx.lineWidth = 1.5;
-            ctx.fillRect(dialogX, dialogY, dialogW, dialogH);
-            ctx.strokeRect(dialogX, dialogY, dialogW, dialogH);
 
-            // Arrow tip
+            // Rounded rectangle helper
+            const roundRect = (x, y, w, h, r) => {
+              ctx.beginPath();
+              ctx.moveTo(x + r, y);
+              ctx.lineTo(x + w - r, y);
+              ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+              ctx.lineTo(x + w, y + h - r);
+              ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+              ctx.lineTo(x + r, y + h);
+              ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+              ctx.lineTo(x, y + r);
+              ctx.quadraticCurveTo(x, y, x + r, y);
+              ctx.closePath();
+            };
+
+            // Soft executive shadow for high contrast over light & dark campus maps
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.72)';
+            ctx.shadowBlur = 22;
+            ctx.shadowOffsetY = 8;
+
+            // Card background body
+            roundRect(dialogX, dialogY, dialogW, dialogH, 10);
+            ctx.fillStyle = '#1E293B';
+            ctx.fill();
+
+            // Clear shadow for crisp inner elements
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetY = 0;
+
+            // Header Bar (#0F172A) with rounded top corners
+            ctx.save();
             ctx.beginPath();
-            ctx.moveTo(pt.x - 8, dialogY + dialogH);
-            ctx.lineTo(pt.x + 8, dialogY + dialogH);
-            ctx.lineTo(pt.x, dialogY + dialogH + 10);
+            if (placeAbove) {
+              ctx.moveTo(dialogX + 10, dialogY);
+              ctx.lineTo(dialogX + dialogW - 10, dialogY);
+              ctx.quadraticCurveTo(dialogX + dialogW, dialogY, dialogX + dialogW, dialogY + 10);
+              ctx.lineTo(dialogX + dialogW, dialogY + 42);
+              ctx.lineTo(dialogX, dialogY + 42);
+              ctx.lineTo(dialogX, dialogY + 10);
+              ctx.quadraticCurveTo(dialogX, dialogY, dialogX + 10, dialogY);
+            } else {
+              ctx.rect(dialogX, dialogY, dialogW, 42);
+            }
+            ctx.closePath();
+            ctx.fillStyle = '#0F172A';
+            ctx.fill();
+            ctx.restore();
+
+            // Header divider line
+            ctx.beginPath();
+            ctx.moveTo(dialogX, dialogY + 42);
+            ctx.lineTo(dialogX + dialogW, dialogY + 42);
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Card border
+            roundRect(dialogX, dialogY, dialogW, dialogH, 10);
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+
+            // Arrow Tip pointing to Stop Pin
+            ctx.beginPath();
+            if (placeAbove) {
+              ctx.moveTo(arrowX - 11, dialogY + dialogH);
+              ctx.lineTo(arrowX + 11, dialogY + dialogH);
+              ctx.lineTo(arrowX, dialogY + dialogH + 13);
+            } else {
+              ctx.moveTo(arrowX - 11, dialogY);
+              ctx.lineTo(arrowX + 11, dialogY);
+              ctx.lineTo(arrowX, dialogY - 13);
+            }
             ctx.closePath();
             ctx.fillStyle = '#1E293B';
             ctx.fill();
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = 1.8;
             ctx.stroke();
 
-            // Header
+            // Badge circle in header
+            const badgeRadius = 12;
+            const badgeCenterY = dialogY + 21;
+            ctx.beginPath();
+            ctx.arc(dialogX + 24, badgeCenterY, badgeRadius, 0, Math.PI * 2);
+            ctx.fillStyle = stop.color || '#DC2626';
+            ctx.fill();
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.stroke();
+
+            // Badge text
             ctx.fillStyle = '#FFFFFF';
             ctx.font = 'bold 12px "Plus Jakarta Sans", Segoe UI, sans-serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(stop.title, dialogX + 10, dialogY + 18);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(stop.badge || `${idx + 1}`, dialogX + 24, badgeCenterY);
 
-            // Description (multiline truncated)
-            ctx.fillStyle = '#CBD5E1';
-            ctx.font = '10px "Plus Jakarta Sans", Segoe UI, sans-serif';
-            const desc = stop.desc || '';
-            ctx.fillText(desc.substring(0, 36), dialogX + 10, dialogY + 38);
-            if (desc.length > 36) {
-              ctx.fillText(desc.substring(36, 72) + '...', dialogX + 10, dialogY + 52);
+            // Stop Title in header (bold 16px)
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = 'bold 16px "Plus Jakarta Sans", Segoe UI, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            const maxTitleWidth = dialogW - 64;
+            let displayTitle = stop.title || `Stop ${idx + 1}`;
+            while (ctx.measureText(displayTitle).width > maxTitleWidth && displayTitle.length > 5) {
+              displayTitle = displayTitle.substring(0, displayTitle.length - 4) + '...';
+            }
+            ctx.fillText(displayTitle, dialogX + 44, badgeCenterY);
+
+            // Multiline Word-Wrapped Description
+            ctx.fillStyle = '#E2E8F0';
+            ctx.font = '13.5px "Plus Jakarta Sans", Segoe UI, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+
+            const descText = stop.desc || 'Active master plan focal destination.';
+            const words = descText.split(' ');
+            const lines = [];
+            let currentLine = '';
+            const maxTextWidth = dialogW - 32;
+
+            for (let w = 0; w < words.length; w++) {
+              const testLine = currentLine ? currentLine + ' ' + words[w] : words[w];
+              if (ctx.measureText(testLine).width > maxTextWidth && currentLine) {
+                lines.push(currentLine);
+                currentLine = words[w];
+                if (lines.length >= 2) break; // Limit to 2 lines to leave room for badges
+              } else {
+                currentLine = testLine;
+              }
+            }
+            if (currentLine && lines.length < 2) {
+              lines.push(currentLine);
+            } else if (lines.length >= 2 && currentLine) {
+              // Add ellipsis if truncated
+              lines[1] = lines[1].replace(/(\s+[^\s]+)$/, '...');
             }
 
-            // Tag
+            const lineSpacing = 19;
+            lines.forEach((l, lIdx) => {
+              ctx.fillText(l, dialogX + 16, dialogY + 65 + lIdx * lineSpacing);
+            });
+
+            // Metadata Tags Row at bottom
+            const tagY = dialogY + dialogH - 24;
+            const primaryMetric = stop.metric || 'Presentation Hub';
+
+            // Tag 1 (Metric pill)
+            ctx.font = 'bold 11.5px "Plus Jakarta Sans", Segoe UI, sans-serif';
+            const tag1Width = ctx.measureText(primaryMetric).width + 16;
+
+            roundRect(dialogX + 16, tagY, tag1Width, 20, 4);
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+            ctx.fill();
+            ctx.strokeStyle = '#0284C7';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
             ctx.fillStyle = '#38BDF8';
-            ctx.font = 'bold 9px "Plus Jakarta Sans", Segoe UI, sans-serif';
-            ctx.fillText(stop.metric || 'Key Hub', dialogX + 10, dialogY + 68);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(primaryMetric, dialogX + 16 + tag1Width / 2, tagY + 10);
+
+            // Optional Tag 2 (Facility/Category) if space permits
+            if (stop.tag && dialogW - (dialogX + 16 + tag1Width + 12) > 90) {
+              const secondaryTag = stop.tag;
+              const tag2Width = ctx.measureText(secondaryTag).width + 16;
+              const tag2X = dialogX + 16 + tag1Width + 8;
+
+              roundRect(tag2X, tagY, tag2Width, 20, 4);
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+              ctx.fill();
+              ctx.strokeStyle = '#475569';
+              ctx.lineWidth = 1;
+              ctx.stroke();
+
+              ctx.fillStyle = '#94A3B8';
+              ctx.fillText(secondaryTag, tag2X + tag2Width / 2, tagY + 10);
+            }
+
             ctx.restore();
           }
         }

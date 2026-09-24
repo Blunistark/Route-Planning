@@ -1062,12 +1062,13 @@ body.presentation-active .waypoint-node-group {
   z-index: 50;
   pointer-events: auto;
   transform: translate(-50%, -100%);
-  margin-top: -38px; /* sits directly above marker */
-  width: 290px;
+  margin-top: -46px; /* sits comfortably above marker pin */
+  width: 380px;
+  max-width: 90vw;
   background: #1E293B;
-  border: 1.5px solid #475569;
+  border: 1.8px solid #475569;
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-popover);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
   color: #F8FAFC;
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
@@ -1081,7 +1082,7 @@ body.presentation-active .waypoint-node-group {
 .callout-header {
   background: #0F172A;
   border-bottom: 1px solid var(--border-formal);
-  padding: 8px 10px;
+  padding: 10px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1092,23 +1093,24 @@ body.presentation-active .waypoint-node-group {
 .callout-header-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
+  gap: 10px;
+  font-size: 1.05rem;
   font-weight: 700;
   color: #FFFFFF;
 }
 
 .callout-badge-circle {
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: var(--color-formal-red);
   color: #fff;
-  font-size: 0.7rem;
+  font-size: 0.82rem;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .callout-close-btn {
@@ -1116,65 +1118,67 @@ body.presentation-active .waypoint-node-group {
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 1.15rem;
   padding: 0 4px;
+  line-height: 1;
 }
 
 .callout-close-btn:hover { color: #fff; }
 
 .callout-body {
-  padding: 10px;
+  padding: 14px 16px;
 }
 
 .callout-desc {
-  font-size: 0.78rem;
+  font-size: 0.92rem;
   color: var(--text-secondary);
-  line-height: 1.45;
-  margin-bottom: 8px;
+  line-height: 1.5;
+  margin-bottom: 12px;
 }
 
 .callout-meta-row {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   color: var(--text-muted);
-  padding-top: 6px;
+  padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .callout-tag {
   background: #0F172A;
   border: 1px solid var(--border-formal);
-  padding: 1px 6px;
-  border-radius: var(--radius-xs);
+  padding: 3px 10px;
+  border-radius: 4px;
   color: #38BDF8;
   font-weight: 600;
+  font-size: 0.78rem;
 }
 
 /* Callout Arrow Pointer pointing to building/pin */
 .callout-pointer-arrow {
   position: absolute;
-  bottom: -8px;
+  bottom: -11px;
   left: 50%;
   transform: translateX(-50%);
   width: 0;
   height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-top: 8px solid #475569;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 11px solid #475569;
 }
 
 .callout-pointer-arrow::after {
   content: '';
   position: absolute;
   bottom: 1.5px;
-  left: -7px;
+  left: -9px;
   width: 0;
   height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-top: 7px solid #1E293B;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 10px solid #1E293B;
 }
 
 /* ==========================================================================
