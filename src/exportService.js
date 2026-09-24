@@ -295,11 +295,11 @@ export class ExportService {
     const pacing = options.pacing || 'slow';
     const targetFps = parseInt(options.fps, 10) || 60;
 
-    let paceFactor = 1.25; // Calm, executive presentation pacing
+    let paceFactor = 1.35; // Calm, deliberate, cinematic presentation pacing
     if (pacing === 'standard') {
-      paceFactor = 0.9;
+      paceFactor = 1.0;
     } else if (pacing === 'brisk') {
-      paceFactor = 0.65;
+      paceFactor = 0.75;
     }
 
     const mimeTypes = [
@@ -369,44 +369,70 @@ export class ExportService {
         onProgress(i + 1, steps.length, step.title);
       }
 
-      // Phase 1: Cinematic Camera Glide (Pan & Zoom)
-      if (i > 0) {
-        const panDuration = 1250 * paceFactor;
-        await animatePhase(panDuration, (t) => {
-          // Smooth easeInOutCubic for cinema-like camera motion
-          const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-          const interpolatedCamera = {
-            zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
-            centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
-            centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
-          };
-          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
-        });
-      }
-
-      // Phase 2: Active Step Progression (Smooth corridor drawing or stop focus)
       if (step.type === 'route') {
-        const routeDuration = 2400 * paceFactor;
-        await animatePhase(routeDuration, (progress) => {
-          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
+        // Generous deliberate corridor drawing duration matching the browser experience
+        const baseDuration = (step.routeData?.duration || 3.0) * 1000;
+        const totalRouteDuration = Math.max(3800, baseDuration * 1.3 * paceFactor);
+
+        // Phase 1: Smooth camera pan/zoom into corridor framing (first 850ms)
+        // Corridor starts drawing its initial 12% simultaneously so motion is fluid
+        const panDuration = i > 0 ? Math.min(850, totalRouteDuration * 0.25) : 0;
+        if (panDuration > 0) {
+          await animatePhase(panDuration, (t) => {
+            const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            const interpolatedCamera = {
+              zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
+              centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
+              centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
+            };
+            // Trace the first 12% of route smoothly while camera glides
+            const initialProgress = t * 0.12;
+            this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, initialProgress, interpolatedCamera);
+          });
+        }
+
+        // Phase 2: Full deliberate corridor drawing (from 12% to 100%)
+        const remainingDuration = totalRouteDuration - panDuration;
+        await animatePhase(remainingDuration, (t) => {
+          const overallProgress = 0.12 + t * 0.88;
+          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, overallProgress, targetCamera);
+        });
+
+        // Phase 3: Hold step snapshot so audience can clearly see the completed corridor
+        const holdDuration = 1800 * paceFactor;
+        await animatePhase(holdDuration, () => {
+          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
         });
       } else {
-        const drawDuration = 750 * paceFactor;
+        // Non-route step (Stops, Overview, Summary)
+        if (i > 0) {
+          const panDuration = 1150 * paceFactor;
+          await animatePhase(panDuration, (t) => {
+            const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            const interpolatedCamera = {
+              zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
+              centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
+              centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
+            };
+            this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
+          });
+        }
+
+        const drawDuration = 700 * paceFactor;
         await animatePhase(drawDuration, (progress) => {
           this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
         });
+
+        const holdDuration = (
+          step.type === 'stop'
+            ? 2400
+            : (step.type === 'overview' || step.type === 'summary' ? 2800 : 1600)
+        ) * paceFactor;
+
+        await animatePhase(holdDuration, () => {
+          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
+        });
       }
-
-      // Phase 3: Hold step snapshot so audience can read callout dialog, badge, and metrics
-      const holdDuration = (
-        step.type === 'stop'
-          ? 2400
-          : (step.type === 'overview' || step.type === 'summary' ? 2800 : 1600)
-      ) * paceFactor;
-
-      await animatePhase(holdDuration, () => {
-        this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
-      });
 
       previousCamera = targetCamera;
     }
@@ -579,47 +605,64 @@ export class ExportService {
         ctx.lineJoin = 'round';
         ctx.stroke();
 
-        // Draw Directional Arrowhead at current tip
-        if (route.arrowEnd !== false && targetDist > 8) {
+        // Animated luminous traveler token indicator smoothly gliding with the advancing route tip
+        if (isCurrentRoute && targetDist > 3 && progress < 0.98) {
           const screenTip = toScreen(tipPt);
-          const arrowLen = Math.max(10, 11 * effScale * 1.35);
-          const arrowWid = Math.max(6, 7 * effScale * 1.35);
+          const tokenScale = Math.max(0.9, Math.min(2.0, effScale * 1.4));
+          const pulse = 1.0 + 0.15 * Math.sin(progress * Math.PI * 8);
+
+          ctx.save();
+          // Outer aura ring
+          ctx.beginPath();
+          ctx.arc(screenTip.x, screenTip.y, 13 * tokenScale * pulse, 0, Math.PI * 2);
+          ctx.fillStyle = route.color || '#DC2626';
+          ctx.globalAlpha = 0.38;
+          ctx.fill();
+
+          // Mid glow core
+          ctx.beginPath();
+          ctx.arc(screenTip.x, screenTip.y, 7.5 * tokenScale, 0, Math.PI * 2);
+          ctx.fillStyle = route.color || '#DC2626';
+          ctx.globalAlpha = 0.75;
+          ctx.fill();
+
+          // Inner solid crisp dot
+          ctx.beginPath();
+          ctx.arc(screenTip.x, screenTip.y, 4.5 * tokenScale, 0, Math.PI * 2);
+          ctx.globalAlpha = 1.0;
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fill();
+          ctx.lineWidth = 2.0;
+          ctx.strokeStyle = route.color || '#DC2626';
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // Destination Terminal Arrowhead (displayed once route is fully drawn or completed, matching SVG marker-end)
+        const showEndArrow = route.arrowEnd !== false && (!isCurrentRoute || progress >= 0.95);
+        if (showEndArrow && points.length >= 2) {
+          const lastA = points[points.length - 2];
+          const lastB = points[points.length - 1];
+          const lastAngle = Math.atan2(lastB.y - lastA.y, lastB.x - lastA.x);
+          const screenLast = toScreen(lastB);
+
+          const arrowLen = Math.max(11, 13 * effScale * 1.35);
+          const arrowWid = Math.max(7, 8.5 * effScale * 1.35);
 
           ctx.save();
           ctx.beginPath();
-          ctx.moveTo(screenTip.x, screenTip.y);
+          ctx.moveTo(screenLast.x, screenLast.y);
           ctx.lineTo(
-            screenTip.x - arrowLen * Math.cos(tipAngle) + arrowWid * Math.sin(tipAngle),
-            screenTip.y - arrowLen * Math.sin(tipAngle) - arrowWid * Math.cos(tipAngle)
+            screenLast.x - arrowLen * Math.cos(lastAngle) + arrowWid * Math.sin(lastAngle),
+            screenLast.y - arrowLen * Math.sin(lastAngle) - arrowWid * Math.cos(lastAngle)
           );
           ctx.lineTo(
-            screenTip.x - arrowLen * Math.cos(tipAngle) - arrowWid * Math.sin(tipAngle),
-            screenTip.y - arrowLen * Math.sin(tipAngle) + arrowWid * Math.cos(tipAngle)
+            screenLast.x - arrowLen * Math.cos(lastAngle) - arrowWid * Math.sin(lastAngle),
+            screenLast.y - arrowLen * Math.sin(lastAngle) + arrowWid * Math.cos(lastAngle)
           );
           ctx.closePath();
           ctx.fillStyle = route.color || '#DC2626';
           ctx.fill();
-          ctx.restore();
-        }
-
-        // Animated traveler token indicator smoothly following the advancing route tip
-        if (isCurrentRoute && targetDist > 4 && progress < 0.98) {
-          const screenTip = toScreen(tipPt);
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(screenTip.x, screenTip.y, 11 * effScale, 0, Math.PI * 2);
-          ctx.fillStyle = route.color || '#DC2626';
-          ctx.globalAlpha = 0.35;
-          ctx.fill();
-
-          ctx.beginPath();
-          ctx.arc(screenTip.x, screenTip.y, 6 * effScale, 0, Math.PI * 2);
-          ctx.globalAlpha = 1.0;
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fill();
-          ctx.lineWidth = 2.5;
-          ctx.strokeStyle = route.color || '#DC2626';
-          ctx.stroke();
           ctx.restore();
         }
       });

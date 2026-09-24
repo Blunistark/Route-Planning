@@ -5,8 +5,10 @@ import { DrawingTools } from './drawingTools.js';
 import { AnimationEngine } from './animationEngine.js';
 import { PresentationMode } from './presentationMode.js';
 import { ExportService } from './exportService.js';
+import { SavedRoutesService } from './savedRoutesService.js';
 
 let appState = JSON.parse(JSON.stringify(sampleCampusPlan));
+let savedRoutesService = null;
 
 // DOM Elements
 const stageViewport = document.getElementById('stageViewport');
@@ -144,6 +146,10 @@ function initApp() {
     setTimeout(() => canvasEngine.fitToScreen(40), 100);
   }
 
+  savedRoutesService = new SavedRoutesService();
+  checkUrlHashForRoutes();
+  window.addEventListener('hashchange', () => checkUrlHashForRoutes());
+
   renderAllLayers();
   updateSidebarLists();
   renderTimelinePills();
@@ -248,6 +254,10 @@ function bindUIEvents() {
           animationEngine.showAllRoutes();
         }
       }
+      if (targetId === 'saved') {
+        document.getElementById('tabSaved').classList.add('active');
+        renderSavedRoutesList();
+      }
       if (targetId === 'zones') document.getElementById('tabZones').classList.add('active');
       if (targetId === 'settings') document.getElementById('tabSettings').classList.add('active');
     });
@@ -260,6 +270,24 @@ function bindUIEvents() {
   document.getElementById('btnDrawZoneQuick').addEventListener('click', () => setTool('zone', toolZone));
   document.getElementById('btnShowAllRoutes')?.addEventListener('click', () => {
     animationEngine.showAllRoutes();
+  });
+
+  // Saved Routes Actions
+  document.getElementById('btnQuickSaveRoutes')?.addEventListener('click', () => openSaveRouteModal());
+  document.getElementById('btnSaveActiveRoutesFromTab')?.addEventListener('click', () => openSaveRouteModal());
+  document.getElementById('btnOpenSaveRouteModal')?.addEventListener('click', () => openSaveRouteModal());
+  document.getElementById('btnGoToSavedTab')?.addEventListener('click', () => {
+    const savedTabBtn = document.querySelector('.sidebar-tabs .tab-btn[data-tab="saved"]');
+    if (savedTabBtn) savedTabBtn.click();
+  });
+
+  // Save Route Modal Events
+  document.getElementById('btnCloseSaveRouteModal')?.addEventListener('click', () => closeSaveRouteModal());
+  document.getElementById('btnCancelSaveRoute')?.addEventListener('click', () => closeSaveRouteModal());
+  document.getElementById('btnConfirmSaveRoute')?.addEventListener('click', () => handleConfirmSaveRoute());
+  document.getElementById('btnCopyGeneratedLink')?.addEventListener('click', () => handleCopyModalLink());
+  document.getElementById('savedRoutesSearch')?.addEventListener('input', (e) => {
+    renderSavedRoutesList(e.target.value);
   });
 
   // Settings Checkboxes
@@ -603,6 +631,12 @@ export function renderAllLayers() {
   document.getElementById('badgeLabelsCount').textContent = (appState.permanentLabels || []).length;
   document.getElementById('badgeRoutesCount').textContent = appState.routes.length;
   document.getElementById('badgeZonesCount').textContent = appState.zones.length;
+
+  const savedCount = savedRoutesService ? savedRoutesService.getAll().length : 0;
+  const badgeSaved = document.getElementById('badgeSavedCount');
+  if (badgeSaved) badgeSaved.textContent = savedCount;
+  const tabSavedCounter = document.getElementById('routesTabSavedCounter');
+  if (tabSavedCounter) tabSavedCounter.textContent = savedCount;
 }
 
 // Ensure SVG Arrowhead Markers are defined for all route colors
@@ -1367,6 +1401,321 @@ function updateSidebarLists() {
     });
 
     zonesList.appendChild(card);
+  });
+
+  // 5. Saved routes list
+  renderSavedRoutesList();
+}
+
+// -------------------------------------------------------------
+// State Reference Synchronization
+// -------------------------------------------------------------
+function syncAppStateReferences() {
+  if (drawingTools) drawingTools.state = appState;
+  if (animationEngine) animationEngine.state = appState;
+  if (presentationMode) presentationMode.state = appState;
+  if (exportService) exportService.state = appState;
+}
+
+// -------------------------------------------------------------
+// Global Toast Notifications
+// -------------------------------------------------------------
+let toastTimeout = null;
+export function showToast(message, icon = '✔') {
+  const toast = document.getElementById('globalToast');
+  const msgEl = document.getElementById('toastMessage');
+  const iconEl = document.getElementById('toastIcon');
+  if (!toast || !msgEl) return;
+
+  msgEl.textContent = message;
+  if (iconEl) iconEl.textContent = icon;
+
+  toast.classList.remove('hidden');
+  toast.style.opacity = '1';
+
+  if (toastTimeout) clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.classList.add('hidden'), 300);
+  }, 4000);
+}
+
+// -------------------------------------------------------------
+// URL Hash Route Loading (Shareable Direct Links)
+// -------------------------------------------------------------
+function checkUrlHashForRoutes() {
+  if (!savedRoutesService) return;
+  const parsed = savedRoutesService.parseFromHash();
+  if (parsed && Array.isArray(parsed.routes) && parsed.routes.length > 0) {
+    appState.routes = JSON.parse(JSON.stringify(parsed.routes));
+    if (Array.isArray(parsed.stops) && parsed.stops.length > 0) {
+      appState.stops = JSON.parse(JSON.stringify(parsed.stops));
+    }
+    if (parsed.name) {
+      appState.title = parsed.name;
+      const titleInput = document.getElementById('projectTitle');
+      if (titleInput) titleInput.value = parsed.name;
+    }
+
+    syncAppStateReferences();
+    renderAllLayers();
+    updateSidebarLists();
+    animationEngine.compileSteps();
+    renderTimelinePills();
+    animationEngine.showAllRoutes();
+
+    showToast(`Loaded "${parsed.name || 'Saved Route Set'}" (${parsed.routes.length} corridors) from link!`, '🔗');
+
+    // Switch to Saved tab
+    setTimeout(() => {
+      const savedTab = document.querySelector('.tab-btn[data-tab="saved"]');
+      if (savedTab) savedTab.click();
+    }, 200);
+  }
+}
+
+// -------------------------------------------------------------
+// Save Route Modal Actions
+// -------------------------------------------------------------
+function openSaveRouteModal() {
+  const modal = document.getElementById('modalSaveRoute');
+  const titleInput = document.getElementById('saveRouteTitle');
+  const descInput = document.getElementById('saveRouteDesc');
+  const summaryCount = document.getElementById('saveRouteSummaryCount');
+  const summaryPoints = document.getElementById('saveRouteSummaryPoints');
+  const summaryDur = document.getElementById('saveRouteSummaryDur');
+  const linkInput = document.getElementById('shareableLinkInput');
+
+  if (!modal) return;
+
+  const routes = appState.routes || [];
+  if (routes.length === 0) {
+    showToast('Please create or load at least one route before saving.', '⚠️');
+    return;
+  }
+
+  const totalPoints = routes.reduce((acc, r) => acc + (r.points ? r.points.length : 0), 0);
+  const totalDuration = routes.reduce((acc, r) => acc + (r.duration || 3.0), 0);
+
+  if (titleInput) {
+    titleInput.value = appState.title ? `${appState.title} - Corridors` : `Campus Route Plan (${new Date().toLocaleDateString()})`;
+  }
+  if (descInput) {
+    descInput.value = `Master plan corridor set with ${routes.length} sequential routes and ${totalPoints} waypoints.`;
+  }
+  if (summaryCount) summaryCount.textContent = `${routes.length} Corridor${routes.length === 1 ? '' : 's'} mapped`;
+  if (summaryPoints) summaryPoints.textContent = `${totalPoints} Waypoints`;
+  if (summaryDur) summaryDur.textContent = `${totalDuration.toFixed(1)}s estimated tour`;
+
+  const refreshLink = () => {
+    const dummy = {
+      name: titleInput ? titleInput.value : 'Campus Routes',
+      desc: descInput ? descInput.value : '',
+      routes: appState.routes,
+      stops: appState.stops
+    };
+    if (linkInput) linkInput.value = savedRoutesService.generateShareableLink(dummy);
+  };
+
+  refreshLink();
+  titleInput.oninput = refreshLink;
+  descInput.oninput = refreshLink;
+
+  modal.classList.remove('hidden');
+}
+
+function closeSaveRouteModal() {
+  const modal = document.getElementById('modalSaveRoute');
+  if (modal) modal.classList.add('hidden');
+}
+
+function handleConfirmSaveRoute() {
+  const titleInput = document.getElementById('saveRouteTitle');
+  const descInput = document.getElementById('saveRouteDesc');
+  const name = titleInput ? titleInput.value : '';
+  const desc = descInput ? descInput.value : '';
+
+  try {
+    const newPreset = savedRoutesService.saveRouteSet(name, desc, appState.routes, appState.stops);
+    closeSaveRouteModal();
+    renderAllLayers();
+    renderSavedRoutesList();
+    showToast(`Saved "${newPreset.name}" to your sidebar library!`, '💾');
+
+    // Switch to Saved tab
+    const savedTabBtn = document.querySelector('.sidebar-tabs .tab-btn[data-tab="saved"]');
+    if (savedTabBtn) savedTabBtn.click();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+function handleCopyModalLink() {
+  const linkInput = document.getElementById('shareableLinkInput');
+  if (!linkInput || !linkInput.value) return;
+
+  navigator.clipboard.writeText(linkInput.value).then(() => {
+    showToast('Direct shareable route link copied to clipboard!', '🔗');
+  }).catch(() => {
+    prompt('Copy this route link:', linkInput.value);
+  });
+}
+
+// -------------------------------------------------------------
+// Loading & Merging Route Presets
+// -------------------------------------------------------------
+function loadRoutePreset(preset, isMerge = false) {
+  if (!preset || !preset.routes) return;
+
+  if (isMerge) {
+    const cloned = JSON.parse(JSON.stringify(preset.routes)).map((r, i) => ({
+      ...r,
+      id: `route-merged-${Date.now()}-${i}`
+    }));
+    appState.routes.push(...cloned);
+    showToast(`Merged ${cloned.length} corridors into active map!`, '✔');
+  } else {
+    appState.routes = JSON.parse(JSON.stringify(preset.routes));
+    showToast(`Loaded "${preset.name}" (${preset.routes.length} corridors)`, '✔');
+  }
+
+  // Merge any stops from the preset that don't already exist
+  if (preset.stops && preset.stops.length > 0) {
+    const existingIds = new Set(appState.stops.map(s => s.id));
+    preset.stops.forEach(s => {
+      if (!existingIds.has(s.id)) {
+        appState.stops.push(JSON.parse(JSON.stringify(s)));
+      }
+    });
+  }
+
+  syncAppStateReferences();
+  renderAllLayers();
+  updateSidebarLists();
+  animationEngine.compileSteps();
+  renderTimelinePills();
+  animationEngine.showAllRoutes();
+
+  // Focus on the first route
+  if (appState.routes.length > 0 && appState.routes[0].points && appState.routes[0].points.length > 0) {
+    const p = appState.routes[0].points[0];
+    canvasEngine.panTo(p.x, p.y, 1.25, 400);
+  }
+}
+
+// -------------------------------------------------------------
+// Render Saved Routes List in Sidebar
+// -------------------------------------------------------------
+function renderSavedRoutesList(searchFilter = '') {
+  const container = document.getElementById('savedRoutesList');
+  if (!container || !savedRoutesService) return;
+
+  const allPresets = savedRoutesService.getAll();
+  const filter = (searchFilter || '').toLowerCase().trim();
+  const presets = filter
+    ? allPresets.filter(p => p.name.toLowerCase().includes(filter) || (p.desc && p.desc.toLowerCase().includes(filter)))
+    : allPresets;
+
+  const countBadge = document.getElementById('badgeSavedCount');
+  if (countBadge) countBadge.textContent = allPresets.length;
+  const tabCounter = document.getElementById('routesTabSavedCounter');
+  if (tabCounter) tabCounter.textContent = allPresets.length;
+
+  if (presets.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 24px 12px; color: #94A3B8; background: #0B1120; border: 1px dashed #334155; border-radius: 6px;">
+        <p style="font-size: 0.85rem; font-weight: 600; color: #CBD5E1; margin-bottom: 4px;">No saved route sets found</p>
+        <p style="font-size: 0.74rem; color: #64748B; margin-bottom: 12px;">Save active routes from the canvas or try another search term.</p>
+        <button id="btnEmptySaveActive" class="mini-btn" style="background: #2563EB;">+ Save Active Routes Now</button>
+      </div>
+    `;
+    container.querySelector('#btnEmptySaveActive')?.addEventListener('click', () => {
+      openSaveRouteModal();
+    });
+    return;
+  }
+
+  container.innerHTML = '';
+  presets.forEach((preset) => {
+    const card = document.createElement('div');
+    card.className = 'saved-route-card';
+
+    const routeCount = (preset.routes || []).length;
+    const totalPoints = (preset.routes || []).reduce((acc, r) => acc + (r.points ? r.points.length : 0), 0);
+    const totalDuration = (preset.routes || []).reduce((acc, r) => acc + (r.duration || 3.0), 0);
+
+    const swatchesHtml = (preset.routes || []).slice(0, 5).map(r => 
+      `<span class="saved-route-swatch" style="background: ${r.color || '#DC2626'};" title="${r.title || 'Corridor'}"></span>`
+    ).join('');
+
+    const formattedDate = new Date(preset.createdAt || Date.now()).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric'
+    });
+
+    card.innerHTML = `
+      <div class="saved-route-card-header">
+        <span class="saved-route-card-title">${preset.name}</span>
+        <span class="${preset.isDefault ? 'saved-route-tag-default' : 'saved-route-tag-user'}">
+          ${preset.isDefault ? 'Preset' : 'Saved'}
+        </span>
+      </div>
+      <p class="saved-route-card-desc">${preset.desc || 'No description provided.'}</p>
+      
+      <div class="saved-route-stats-bar">
+        <div class="saved-route-color-swatches">
+          ${swatchesHtml}
+          <span style="margin-left: 4px; font-weight: 600;">${routeCount} corridor${routeCount === 1 ? '' : 's'}</span>
+        </div>
+        <span>${totalPoints} pts • ${totalDuration.toFixed(1)}s</span>
+        <span style="color: #64748B;">${formattedDate}</span>
+      </div>
+
+      <div class="saved-route-actions-grid">
+        <button class="saved-route-btn-action primary-load btn-load-preset" title="Replace canvas routes with this saved route plan">
+          <span>▶ Load</span>
+        </button>
+        <button class="saved-route-btn-action share-link btn-copy-preset-link" title="Copy direct link to load this route plan anywhere">
+          <span>🔗 Link</span>
+        </button>
+        <button class="saved-route-btn-action btn-append-preset" title="Merge this route set into existing canvas routes">
+          <span>+ Merge</span>
+        </button>
+        <button class="saved-route-btn-action danger-delete btn-delete-preset" title="Remove preset from library" ${preset.isDefault ? 'style="opacity: 0.4;"' : ''}>
+          <span>✕ Delete</span>
+        </button>
+      </div>
+    `;
+
+    card.querySelector('.btn-load-preset').addEventListener('click', () => {
+      loadRoutePreset(preset, false);
+      document.querySelectorAll('.saved-route-card').forEach(c => c.classList.remove('is-active-preset'));
+      card.classList.add('is-active-preset');
+    });
+
+    card.querySelector('.btn-append-preset').addEventListener('click', () => {
+      loadRoutePreset(preset, true);
+    });
+
+    card.querySelector('.btn-copy-preset-link').addEventListener('click', () => {
+      const shareUrl = savedRoutesService.generateShareableLink(preset);
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        showToast(`Copied direct link for "${preset.name}"!`, '🔗');
+      }).catch(() => {
+        prompt('Copy this route link:', shareUrl);
+      });
+    });
+
+    card.querySelector('.btn-delete-preset').addEventListener('click', () => {
+      if (confirm(`Delete saved route set "${preset.name}"?`)) {
+        savedRoutesService.deleteRouteSet(preset.id);
+        renderSavedRoutesList(document.getElementById('savedRoutesSearch')?.value || '');
+        renderAllLayers();
+        showToast(`Deleted "${preset.name}"`, '🗑');
+      }
+    });
+
+    container.appendChild(card);
   });
 }
 

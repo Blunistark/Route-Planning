@@ -80,6 +80,10 @@
           <span>Export PPTX</span>
         </button>
 
+        <button id="btnOpenSaveRouteModal" class="action-btn secondary" title="Save current route set & generate shareable link" style="border-color: #3B82F6; color: #93C5FD;">
+          <span>✦ Save Routes & Link</span>
+        </button>
+
         <button id="btnRecordVideo" class="action-btn secondary" title="Record Video for PPT">
           <span>Record Video</span>
         </button>
@@ -109,6 +113,10 @@
           <button class="tab-btn" data-tab="routes">
             <span>Routes</span>
             <span id="badgeRoutesCount" class="tab-counter">0</span>
+          </button>
+          <button class="tab-btn" data-tab="saved" title="Saved Routes Library & Options">
+            <span>Saved</span>
+            <span id="badgeSavedCount" class="tab-counter">0</span>
           </button>
           <button class="tab-btn" data-tab="zones">
             <span>Zones</span>
@@ -176,7 +184,9 @@
           <div id="tabRoutes" class="tab-pane">
             <div class="pane-header">
               <h3>Route Corridors</h3>
-              <div class="pane-header-actions">
+              <div class="pane-header-actions" style="display: flex; gap: 4px; flex-wrap: wrap;">
+                <button id="btnQuickSaveRoutes" class="mini-btn-secondary" style="border-color: #3B82F6; color: #93C5FD;" title="Save current routes & generate link">✦ Save</button>
+                <button id="btnGoToSavedTab" class="mini-btn-secondary" title="View options to see saved routes">Saved (<span id="routesTabSavedCounter">0</span>)</button>
                 <button id="btnShowAllRoutes" class="mini-btn-secondary" title="Show all corridors simultaneously on map for editing">Show All</button>
                 <button id="btnDrawRouteQuick" class="mini-btn">+ Draw Route</button>
               </div>
@@ -184,6 +194,23 @@
             <p class="pane-help">Planned corridors with directional arrows. <strong>Drag cards or tap ▲ / ▼</strong> to customize visualization sequence order. Click any node on the map to split or branch.</p>
             <div id="routesList" class="items-list routes-reorderable-list">
               <!-- Dynamically populated with sequence order badges and drag handles -->
+            </div>
+          </div>
+
+          <!-- Saved Routes Library Tab -->
+          <div id="tabSaved" class="tab-pane">
+            <div class="pane-header">
+              <h3>Saved Route Library</h3>
+              <button id="btnSaveActiveRoutesFromTab" class="mini-btn" style="background: #2563EB;">+ Save Active</button>
+            </div>
+            <p class="pane-help">Stored route sets & shareable links. Click to load, merge, preview, or copy direct links to your routes.</p>
+            
+            <div class="saved-routes-search-bar" style="margin-bottom: 10px;">
+              <input type="text" id="savedRoutesSearch" class="form-input" placeholder="Search saved routes..." style="font-size: 0.8rem; padding: 6px 10px; width: 100%; background: #0B1120; border: 1px solid #334155; color: #F1F5F9; border-radius: 4px;">
+            </div>
+
+            <div id="savedRoutesList" class="items-list saved-routes-list">
+              <!-- Dynamically populated with saved route set cards -->
             </div>
           </div>
 
@@ -566,6 +593,62 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Save Route Plan & Shareable Link Modal -->
+    <div id="modalSaveRoute" class="modal-backdrop hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 10000;">
+      <div class="modal-dialog" style="max-width: 520px; width: 90%; background: #1E293B; border: 1px solid #475569; border-radius: 8px; box-shadow: 0 16px 40px rgba(0,0,0,0.6); overflow: hidden;">
+        <div class="modal-header" style="background: #141E33; border-bottom: 1px solid #334155; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.1rem; color: #38BDF8;">✦</span>
+            <h3 style="font-size: 0.96rem; font-weight: 700; color: #F8FAFC; margin: 0;">Save Route Plan & Generate Direct Link</h3>
+          </div>
+          <button id="btnCloseSaveRouteModal" class="modal-close-btn" style="background: transparent; border: none; color: #94A3B8; font-size: 1.2rem; cursor: pointer;">✕</button>
+        </div>
+        <div class="modal-content" style="padding: 18px;">
+          <p style="font-size: 0.82rem; color: #CBD5E1; margin-bottom: 14px; line-height: 1.45;">
+            Save the active route corridors into your sidebar options library, or copy a direct shareable link that loads these exact corridors in any browser.
+          </p>
+
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label style="font-size: 0.74rem; color: #94A3B8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; display: block; margin-bottom: 4px;">Route Set Title</label>
+            <input type="text" id="saveRouteTitle" class="form-input" placeholder="e.g., Campus Perimeter Loop" style="background: #0B1120; border: 1px solid #334155; color: #F1F5F9; font-size: 0.88rem; padding: 8px 10px; border-radius: 4px; width: 100%;">
+          </div>
+
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label style="font-size: 0.74rem; color: #94A3B8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; display: block; margin-bottom: 4px;">Description / Notes (Optional)</label>
+            <textarea id="saveRouteDesc" class="form-textarea" rows="2" placeholder="e.g., Main pedestrian connection connecting academic wings to athletic facilities" style="background: #0B1120; border: 1px solid #334155; color: #F1F5F9; font-size: 0.82rem; padding: 8px 10px; border-radius: 4px; width: 100%; resize: none;"></textarea>
+          </div>
+
+          <!-- Summary stats box -->
+          <div id="saveRouteSummaryBox" style="background: #0B1120; border: 1px solid #334155; border-radius: 4px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.8rem; color: #94A3B8; display: flex; justify-content: space-between; align-items: center;">
+            <span id="saveRouteSummaryCount">0 Corridors mapped</span>
+            <span id="saveRouteSummaryPoints">0 Waypoints</span>
+            <span id="saveRouteSummaryDur" style="color: #38BDF8; font-weight: 600;">0.0s estimated</span>
+          </div>
+
+          <!-- Direct Link Preview & Copy Box -->
+          <div style="background: #111C33; border: 1px solid #1E3A8A; border-radius: 4px; padding: 12px; margin-bottom: 14px;">
+            <label style="font-size: 0.72rem; color: #60A5FA; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; display: block; margin-bottom: 6px;">Direct Shareable URL Link</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="shareableLinkInput" readonly style="flex: 1; background: #0B1120; border: 1px solid #334155; color: #94A3B8; font-size: 0.76rem; padding: 6px 8px; border-radius: 4px; font-family: monospace;" value="Generating link...">
+              <button id="btnCopyGeneratedLink" class="mini-btn" style="background: #2563EB; font-weight: 600; white-space: nowrap; padding: 6px 12px;">Copy Link</button>
+            </div>
+            <p style="font-size: 0.7rem; color: #64748B; margin-top: 6px;">Anyone opening this link will immediately see these routes loaded onto their campus map.</p>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button id="btnCancelSaveRoute" class="btn-secondary-sm" style="padding: 7px 14px;">Cancel</button>
+            <button id="btnConfirmSaveRoute" class="btn-primary-sm" style="background: #2563EB; color: #fff; padding: 7px 16px; border-radius: 4px; font-weight: 600; border: none; cursor: pointer;">Save to Options Library</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Global Toast Alert -->
+    <div id="globalToast" class="formal-toast hidden" style="position: fixed; bottom: 80px; right: 24px; z-index: 10000; background: #1E293B; border: 1px solid #38BDF8; color: #F8FAFC; padding: 12px 20px; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); font-size: 0.85rem; display: flex; align-items: center; gap: 10px; transition: opacity 0.3s, transform 0.3s;">
+      <span id="toastIcon" style="color: #38BDF8; font-size: 1.1rem;">✔</span>
+      <span id="toastMessage">Action completed successfully.</span>
     </div>
   </div>
 
