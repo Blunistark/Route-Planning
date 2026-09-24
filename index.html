@@ -453,13 +453,22 @@
                 <li>• Real-time route drawing & traveler progression</li>
                 <li>• Ready for PowerPoint native video player</li>
               </ul>
-              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
-                <label for="videoPacingSelect" style="font-size: 0.72rem; color: #94A3B8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Animation Pacing / Speed</label>
-                <select id="videoPacingSelect" class="formal-select" style="background: #0B1120; border: 1px solid #334155; color: #F1F5F9; font-size: 0.8rem; padding: 6px 10px; border-radius: 4px;">
-                  <option value="slow" selected>Gentle & Deliberate (Recommended — Relaxed camera glides & comfortable reading pause)</option>
-                  <option value="standard">Standard (Moderate pacing)</option>
-                  <option value="brisk">Brisk (Faster overview)</option>
-                </select>
+              <div style="display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; margin-top: 4px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <label for="videoPacingSelect" style="font-size: 0.72rem; color: #94A3B8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Pacing</label>
+                  <select id="videoPacingSelect" class="formal-select" style="background: #0B1120; border: 1px solid #334155; color: #F1F5F9; font-size: 0.8rem; padding: 6px 10px; border-radius: 4px; width: 100%;">
+                    <option value="slow" selected>Gentle (Recommended)</option>
+                    <option value="standard">Standard</option>
+                    <option value="brisk">Brisk</option>
+                  </select>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <label for="videoFpsSelect" style="font-size: 0.72rem; color: #94A3B8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Frame Rate</label>
+                  <select id="videoFpsSelect" class="formal-select" style="background: #0B1120; border: 1px solid #334155; color: #F1F5F9; font-size: 0.8rem; padding: 6px 10px; border-radius: 4px; width: 100%;">
+                    <option value="60" selected>60 FPS (Ultra Smooth)</option>
+                    <option value="30">30 FPS (Standard)</option>
+                  </select>
+                </div>
               </div>
               <button id="btnStartVideoRecording" class="btn-export-action secondary">
                 <span id="recordingBtnLabel">Record & Download Video</span>

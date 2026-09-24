@@ -349,12 +349,14 @@ function bindUIEvents() {
 
     const pacingSelect = document.getElementById('videoPacingSelect');
     const chosenPacing = pacingSelect?.value || 'slow';
+    const fpsSelect = document.getElementById('videoFpsSelect');
+    const chosenFps = fpsSelect?.value || '60';
 
     try {
       await exportService.recordVideo((cur, total, title) => {
         recordingStatusTitle.textContent = `Recording slide: ${title}`;
-        recordingStatusSubtitle.textContent = `Progress ${cur} of ${total} (${Math.round((cur / total) * 100)}%)`;
-      }, { pacing: chosenPacing });
+        recordingStatusSubtitle.textContent = `Progress ${cur} of ${total} (${Math.round((cur / total) * 100)}%) • Rendering smooth ${chosenFps} FPS frames`;
+      }, { pacing: chosenPacing, fps: chosenFps });
     } catch (err) {
       console.error(err);
       alert('Error recording video: ' + err.message);

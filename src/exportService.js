@@ -286,26 +286,34 @@ export class ExportService {
     const canvas = document.createElement('canvas');
     canvas.width = 1280;
     canvas.height = 720;
-    const ctx = canvas.getContext('2d');
-
-    const pacing = options.pacing || 'slow';
-    // Multipliers for frames per phase
-    // 'slow': calm, executive pacing where viewers can comfortably observe camera motion and read callout boxes
-    // 'standard': medium pacing
-    // 'brisk': faster
-    let paceMultiplier = 2.4; // default calm/deliberate
-    if (pacing === 'standard') {
-      paceMultiplier = 1.6;
-    } else if (pacing === 'brisk') {
-      paceMultiplier = 1.0;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
     }
 
-    const stream = canvas.captureStream(60);
+    const pacing = options.pacing || 'slow';
+    const targetFps = parseInt(options.fps, 10) || 60;
+
+    let paceFactor = 1.25; // Calm, executive presentation pacing
+    if (pacing === 'standard') {
+      paceFactor = 0.9;
+    } else if (pacing === 'brisk') {
+      paceFactor = 0.65;
+    }
+
+    const mimeTypes = [
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm',
+      'video/mp4'
+    ];
+    const chosenMime = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || 'video/webm';
+
+    const stream = canvas.captureStream(targetFps);
     const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : 'video/webm',
-      videoBitsPerSecond: 4500000
+      mimeType: chosenMime,
+      videoBitsPerSecond: targetFps >= 60 ? 8000000 : 5000000
     });
 
     const recordedChunks = [];
@@ -313,63 +321,105 @@ export class ExportService {
       if (e.data && e.data.size > 0) recordedChunks.push(e.data);
     };
 
-    mediaRecorder.start();
-
     this.animEngine.compileSteps();
     const steps = this.animEngine.steps;
+    if (!steps || steps.length === 0) {
+      throw new Error('No presentation steps found to record.');
+    }
 
-    let previousCamera = this.getStepCamera(steps[0]);
+    // Pre-render the starting frame before starting recording so initial frame is crisp
+    const firstCamera = this.getStepCamera(steps[0]);
+    this.drawFrameToCanvas(ctx, canvas.width, canvas.height, steps[0], 0, 0.0, firstCamera);
+
+    mediaRecorder.start();
+
+    // Small warm-up buffer for recorder encoder
+    await new Promise(r => setTimeout(r, 60));
+
+    // RequestAnimationFrame-synchronized phase animator based on high-resolution performance.now()
+    const animatePhase = (durationMs, onFrame) => {
+      if (durationMs <= 0) {
+        onFrame(1.0);
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        let startTime = null;
+        const tick = (now) => {
+          if (startTime === null) startTime = now;
+          const elapsed = now - startTime;
+          const t = Math.min(1.0, elapsed / durationMs);
+          onFrame(t);
+          if (t < 1.0) {
+            requestAnimationFrame(tick);
+          } else {
+            resolve();
+          }
+        };
+        requestAnimationFrame(tick);
+      });
+    };
+
+    let previousCamera = firstCamera;
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       const targetCamera = this.getStepCamera(step);
 
-      if (onProgress) onProgress(i + 1, steps.length, step.title);
+      if (onProgress) {
+        onProgress(i + 1, steps.length, step.title);
+      }
 
-      // Phase 1: Smooth Camera Zoom/Pan Transition to New Slide (~1.0s to 1.5s glide)
+      // Phase 1: Cinematic Camera Glide (Pan & Zoom)
       if (i > 0) {
-        const panFrames = Math.round(55 * paceMultiplier);
-        for (let p = 0; p < panFrames; p++) {
-          const t = p / panFrames;
+        const panDuration = 1250 * paceFactor;
+        await animatePhase(panDuration, (t) => {
           // Smooth easeInOutCubic for cinema-like camera motion
           const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
           const interpolatedCamera = {
             zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
             centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
             centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
           };
-
-          await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
-          await new Promise(r => setTimeout(r, 16));
-        }
+          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
+        });
       }
 
-      // Phase 2: Active Step Drawing & Route Progression (~1.5s to 2.5s)
-      const baseDraw = step.type === 'route' ? 50 : 25;
-      const drawFrames = Math.round(baseDraw * paceMultiplier);
-      for (let f = 0; f < drawFrames; f++) {
-        const progress = f / Math.max(1, drawFrames - 1);
-        await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
-        await new Promise(r => setTimeout(r, 16));
+      // Phase 2: Active Step Progression (Smooth corridor drawing or stop focus)
+      if (step.type === 'route') {
+        const routeDuration = 2400 * paceFactor;
+        await animatePhase(routeDuration, (progress) => {
+          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
+        });
+      } else {
+        const drawDuration = 750 * paceFactor;
+        await animatePhase(drawDuration, (progress) => {
+          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
+        });
       }
 
-      // Phase 3: Hold step snapshot so audience can read callout dialog, badge, and metrics (~1.8s to 2.8s)
-      const baseHold = step.type === 'stop' ? 55 : (step.type === 'overview' ? 65 : 45);
-      const holdFrames = Math.round(baseHold * paceMultiplier);
-      for (let h = 0; h < holdFrames; h++) {
-        await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
-        await new Promise(r => setTimeout(r, 16));
-      }
+      // Phase 3: Hold step snapshot so audience can read callout dialog, badge, and metrics
+      const holdDuration = (
+        step.type === 'stop'
+          ? 2400
+          : (step.type === 'overview' || step.type === 'summary' ? 2800 : 1600)
+      ) * paceFactor;
+
+      await animatePhase(holdDuration, () => {
+        this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
+      });
 
       previousCamera = targetCamera;
     }
 
+    // Final hold buffer for clean ending
+    await new Promise(r => setTimeout(r, 400));
+
     return new Promise((resolve) => {
       mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const ext = chosenMime.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(recordedChunks, { type: chosenMime });
         const safeTitle = (this.state.title || 'Campus_Plan').replace(/[^a-z0-9_-]/gi, '_');
-        const fileName = `${safeTitle}_animation.webm`;
+        const fileName = `${safeTitle}_animation.${ext}`;
         triggerBrowserDownload(blob, fileName);
         resolve(blob);
       };
@@ -385,13 +435,17 @@ export class ExportService {
     canvas.width = 1200;
     canvas.height = 900;
     const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+    }
 
     const camera = cameraOverride || this.getStepCamera(step);
-    await this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, stepIndex, 1.0, camera);
+    this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, stepIndex, 1.0, camera);
     return canvas.toDataURL('image/jpeg', 0.92);
   }
 
-  async drawFrameToCanvas(ctx, width, height, step, stepIndex, progress = 1.0, camera = null) {
+  drawFrameToCanvas(ctx, width, height, step, stepIndex, progress = 1.0, camera = null) {
     ctx.fillStyle = '#0F172A';
     ctx.fillRect(0, 0, width, height);
 
@@ -415,7 +469,7 @@ export class ExportService {
       });
 
       ctx.save();
-      // Clip to inner canvas viewport with neat rounded borders
+      // Clip to inner canvas viewport
       ctx.beginPath();
       ctx.rect(0, 0, width, height);
       ctx.clip();
@@ -444,11 +498,12 @@ export class ExportService {
         ctx.stroke();
       });
 
-      // 2. Draw Routes (keep future routes hidden when previous steps are happening)
+      // 2. Draw Routes (Continuous sub-pixel polyline interpolation & progressive visibility)
       const isSummary = step.type === 'summary';
 
       this.state.routes.forEach((route) => {
-        if (!route.points || route.points.length < 2) return;
+        const points = route.points;
+        if (!points || points.length < 2) return;
 
         // Determine step index where this route is introduced
         const routeStepIdx = this.animEngine.steps.findIndex(s => s.type === 'route' && s.activeRouteId === route.id);
@@ -462,17 +517,60 @@ export class ExportService {
 
         const isCurrentRoute = step.type === 'route' && step.activeRouteId === route.id;
 
+        // Precompute cumulative lengths of segments for continuous sub-pixel interpolation
+        let totalLength = 0;
+        const segLengths = [];
+        for (let j = 0; j < points.length - 1; j++) {
+          const dx = points[j + 1].x - points[j].x;
+          const dy = points[j + 1].y - points[j].y;
+          const dist = Math.hypot(dx, dy);
+          segLengths.push(dist);
+          totalLength += dist;
+        }
+
+        if (totalLength <= 0) return;
+
+        // Smooth acceleration and deceleration for route drawing (matches SVG animation)
+        const smoothProgress = isCurrentRoute
+          ? (progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2)
+          : 1.0;
+
+        const targetDist = Math.max(0, Math.min(totalLength, totalLength * smoothProgress));
+        if (targetDist <= 0) return;
+
         ctx.beginPath();
-        const start = toScreen(route.points[0]);
+        const start = toScreen(points[0]);
         ctx.moveTo(start.x, start.y);
 
-        const maxIndex = isCurrentRoute
-          ? Math.max(1, Math.floor(route.points.length * progress))
-          : route.points.length;
+        let accumulated = 0;
+        let tipPt = points[0];
+        let tipAngle = 0;
 
-        for (let i = 1; i < maxIndex; i++) {
-          const pt = toScreen(route.points[i]);
-          ctx.lineTo(pt.x, pt.y);
+        for (let j = 0; j < segLengths.length; j++) {
+          const segLen = segLengths[j];
+          const pA = points[j];
+          const pB = points[j + 1];
+          const angle = Math.atan2(pB.y - pA.y, pB.x - pA.x);
+
+          if (accumulated + segLen <= targetDist) {
+            const screenPt = toScreen(pB);
+            ctx.lineTo(screenPt.x, screenPt.y);
+            accumulated += segLen;
+            tipPt = pB;
+            tipAngle = angle;
+          } else {
+            // Continuous sub-pixel fractional interpolation within the partial segment
+            const remaining = targetDist - accumulated;
+            const frac = segLen > 0 ? remaining / segLen : 0;
+            tipPt = {
+              x: pA.x + (pB.x - pA.x) * frac,
+              y: pA.y + (pB.y - pA.y) * frac
+            };
+            tipAngle = angle;
+            const screenTip = toScreen(tipPt);
+            ctx.lineTo(screenTip.x, screenTip.y);
+            break;
+          }
         }
 
         ctx.strokeStyle = route.color || '#DC2626';
@@ -481,24 +579,22 @@ export class ExportService {
         ctx.lineJoin = 'round';
         ctx.stroke();
 
-        // Draw Arrowhead at End
-        if (route.arrowEnd !== false && maxIndex >= 2) {
-          const pEnd = toScreen(route.points[maxIndex - 1]);
-          const pPrev = toScreen(route.points[maxIndex - 2]);
-          const angle = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
+        // Draw Directional Arrowhead at current tip
+        if (route.arrowEnd !== false && targetDist > 8) {
+          const screenTip = toScreen(tipPt);
           const arrowLen = Math.max(10, 11 * effScale * 1.35);
           const arrowWid = Math.max(6, 7 * effScale * 1.35);
 
           ctx.save();
           ctx.beginPath();
-          ctx.moveTo(pEnd.x, pEnd.y);
+          ctx.moveTo(screenTip.x, screenTip.y);
           ctx.lineTo(
-            pEnd.x - arrowLen * Math.cos(angle) + arrowWid * Math.sin(angle),
-            pEnd.y - arrowLen * Math.sin(angle) - arrowWid * Math.cos(angle)
+            screenTip.x - arrowLen * Math.cos(tipAngle) + arrowWid * Math.sin(tipAngle),
+            screenTip.y - arrowLen * Math.sin(tipAngle) - arrowWid * Math.cos(tipAngle)
           );
           ctx.lineTo(
-            pEnd.x - arrowLen * Math.cos(angle) - arrowWid * Math.sin(angle),
-            pEnd.y - arrowLen * Math.sin(angle) + arrowWid * Math.cos(angle)
+            screenTip.x - arrowLen * Math.cos(tipAngle) - arrowWid * Math.sin(tipAngle),
+            screenTip.y - arrowLen * Math.sin(tipAngle) + arrowWid * Math.cos(tipAngle)
           );
           ctx.closePath();
           ctx.fillStyle = route.color || '#DC2626';
@@ -506,19 +602,18 @@ export class ExportService {
           ctx.restore();
         }
 
-        // Animated traveler token indicator on active route during video
-        if (isCurrentRoute && progress > 0.05 && progress < 0.98) {
-          const curPtIndex = Math.min(maxIndex - 1, route.points.length - 1);
-          const curPt = toScreen(route.points[curPtIndex]);
+        // Animated traveler token indicator smoothly following the advancing route tip
+        if (isCurrentRoute && targetDist > 4 && progress < 0.98) {
+          const screenTip = toScreen(tipPt);
           ctx.save();
           ctx.beginPath();
-          ctx.arc(curPt.x, curPt.y, 11 * effScale, 0, Math.PI * 2);
+          ctx.arc(screenTip.x, screenTip.y, 11 * effScale, 0, Math.PI * 2);
           ctx.fillStyle = route.color || '#DC2626';
           ctx.globalAlpha = 0.35;
           ctx.fill();
 
           ctx.beginPath();
-          ctx.arc(curPt.x, curPt.y, 6 * effScale, 0, Math.PI * 2);
+          ctx.arc(screenTip.x, screenTip.y, 6 * effScale, 0, Math.PI * 2);
           ctx.globalAlpha = 1.0;
           ctx.fillStyle = '#FFFFFF';
           ctx.fill();
@@ -591,6 +686,18 @@ export class ExportService {
 
         const pinRadius = isActive ? Math.max(14, 16 * camZoom * 0.9) : Math.max(10, 12 * camZoom * 0.9);
 
+        // Active Stop Subtle Smooth Halo Ring
+        if (isActive) {
+          ctx.save();
+          ctx.beginPath();
+          const haloSize = pinRadius + 5 + 3 * Math.sin(progress * Math.PI);
+          ctx.arc(pt.x, pt.y, haloSize, 0, Math.PI * 2);
+          ctx.fillStyle = stop.color || '#DC2626';
+          ctx.globalAlpha = 0.28;
+          ctx.fill();
+          ctx.restore();
+        }
+
         // Badge circle
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, pinRadius, 0, Math.PI * 2);
@@ -607,50 +714,55 @@ export class ExportService {
         ctx.textBaseline = 'middle';
         ctx.fillText(stop.badge || `${idx + 1}`, pt.x, pt.y);
 
-        // 5. Draw Callout Dialog Box on Active Stop
+        // 5. Draw Callout Dialog Box on Active Stop with smooth opacity fade-in
         if (isActive && step.type === 'stop' && this.state.showDialogOnFocus !== false) {
           const dialogW = 220;
           const dialogH = 80;
           const dialogX = pt.x - dialogW / 2;
           const dialogY = pt.y - pinRadius - 16 - dialogH;
 
-          ctx.save();
-          ctx.fillStyle = '#1E293B';
-          ctx.strokeStyle = '#64748B';
-          ctx.lineWidth = 1.5;
-          ctx.fillRect(dialogX, dialogY, dialogW, dialogH);
-          ctx.strokeRect(dialogX, dialogY, dialogW, dialogH);
+          // Smooth fade-in during active focus phase (hidden during camera pan glide)
+          const dialogAlpha = Math.min(1.0, Math.max(0.0, (progress - 0.15) / 0.5));
+          if (dialogAlpha > 0.01) {
+            ctx.save();
+            ctx.globalAlpha = dialogAlpha;
+            ctx.fillStyle = '#1E293B';
+            ctx.strokeStyle = '#64748B';
+            ctx.lineWidth = 1.5;
+            ctx.fillRect(dialogX, dialogY, dialogW, dialogH);
+            ctx.strokeRect(dialogX, dialogY, dialogW, dialogH);
 
-          // Arrow tip
-          ctx.beginPath();
-          ctx.moveTo(pt.x - 8, dialogY + dialogH);
-          ctx.lineTo(pt.x + 8, dialogY + dialogH);
-          ctx.lineTo(pt.x, dialogY + dialogH + 10);
-          ctx.closePath();
-          ctx.fillStyle = '#1E293B';
-          ctx.fill();
-          ctx.stroke();
+            // Arrow tip
+            ctx.beginPath();
+            ctx.moveTo(pt.x - 8, dialogY + dialogH);
+            ctx.lineTo(pt.x + 8, dialogY + dialogH);
+            ctx.lineTo(pt.x, dialogY + dialogH + 10);
+            ctx.closePath();
+            ctx.fillStyle = '#1E293B';
+            ctx.fill();
+            ctx.stroke();
 
-          // Header
-          ctx.fillStyle = '#FFFFFF';
-          ctx.font = 'bold 12px "Plus Jakarta Sans", Segoe UI, sans-serif';
-          ctx.textAlign = 'left';
-          ctx.fillText(stop.title, dialogX + 10, dialogY + 18);
+            // Header
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = 'bold 12px "Plus Jakarta Sans", Segoe UI, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(stop.title, dialogX + 10, dialogY + 18);
 
-          // Description (multiline truncated)
-          ctx.fillStyle = '#CBD5E1';
-          ctx.font = '10px "Plus Jakarta Sans", Segoe UI, sans-serif';
-          const desc = stop.desc || '';
-          ctx.fillText(desc.substring(0, 36), dialogX + 10, dialogY + 38);
-          if (desc.length > 36) {
-            ctx.fillText(desc.substring(36, 72) + '...', dialogX + 10, dialogY + 52);
+            // Description (multiline truncated)
+            ctx.fillStyle = '#CBD5E1';
+            ctx.font = '10px "Plus Jakarta Sans", Segoe UI, sans-serif';
+            const desc = stop.desc || '';
+            ctx.fillText(desc.substring(0, 36), dialogX + 10, dialogY + 38);
+            if (desc.length > 36) {
+              ctx.fillText(desc.substring(36, 72) + '...', dialogX + 10, dialogY + 52);
+            }
+
+            // Tag
+            ctx.fillStyle = '#38BDF8';
+            ctx.font = 'bold 9px "Plus Jakarta Sans", Segoe UI, sans-serif';
+            ctx.fillText(stop.metric || 'Key Hub', dialogX + 10, dialogY + 68);
+            ctx.restore();
           }
-
-          // Tag
-          ctx.fillStyle = '#38BDF8';
-          ctx.font = 'bold 9px "Plus Jakarta Sans", Segoe UI, sans-serif';
-          ctx.fillText(stop.metric || 'Key Hub', dialogX + 10, dialogY + 68);
-          ctx.restore();
         }
       });
 
