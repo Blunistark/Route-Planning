@@ -444,10 +444,23 @@ export class ExportService {
         ctx.stroke();
       });
 
-      // 2. Draw Routes (draw prior routes completed, and active route progressively)
-      this.state.routes.forEach(route => {
+      // 2. Draw Routes (keep future routes hidden when previous steps are happening)
+      const isSummary = step.type === 'summary';
+
+      this.state.routes.forEach((route) => {
         if (!route.points || route.points.length < 2) return;
-        const isCurrentRoute = step.activeRouteId === route.id;
+
+        // Determine step index where this route is introduced
+        const routeStepIdx = this.animEngine.steps.findIndex(s => s.type === 'route' && s.activeRouteId === route.id);
+
+        // In progressive tour presentation, keep future routes strictly hidden before their turn
+        if (!isSummary) {
+          if (routeStepIdx === -1 || step.index < routeStepIdx) {
+            return;
+          }
+        }
+
+        const isCurrentRoute = step.type === 'route' && step.activeRouteId === route.id;
 
         ctx.beginPath();
         const start = toScreen(route.points[0]);

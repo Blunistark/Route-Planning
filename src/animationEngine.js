@@ -10,6 +10,7 @@ export class AnimationEngine {
     this.currentStep = 0;
     this.isPlaying = false;
     this.speedFactor = 1.0;
+    this.allRoutesVisibleMode = false;
 
     this.activeAnimId = null;
     this.steps = [];
@@ -56,6 +57,7 @@ export class AnimationEngine {
 
     const { stops = [], routes = [], zones = [] } = this.state;
     const visitedStops = new Set();
+    let lastStopId = null;
 
     if (routes && routes.length > 0) {
       // Sequence follows the exact user-defined ordering of routes!
@@ -76,15 +78,15 @@ export class AnimationEngine {
           toStop = stops.find(s => s.id !== fromStop?.id && Math.hypot(s.x - endP.x, s.y - endP.y) < 110);
         }
 
-        // 1. Reveal fromStop if not yet visited
-        if (fromStop && !visitedStops.has(fromStop.id)) {
+        // 1. Reveal fromStop if not already the immediately preceding stop
+        if (fromStop && fromStop.id !== lastStopId) {
           visitedStops.add(fromStop.id);
           this.steps.push({
             index: this.steps.length,
             type: 'stop',
             title: fromStop.title,
             badge: fromStop.badge,
-            subtitle: `Stop ${fromStop.badge || visitedStops.size}`,
+            subtitle: `Departure: ${fromStop.title}`,
             desc: fromStop.desc,
             notes: fromStop.notes || `Overview of ${fromStop.title}.`,
             metric: fromStop.metric || 'Key Campus Hub',
@@ -105,7 +107,7 @@ export class AnimationEngine {
           type: 'route',
           title: route.title || `Route Corridor ${rIdx + 1}`,
           subtitle: fromStop && toStop
-            ? `Leg: ${fromStop.badge || fromStop.title} → ${toStop.badge || toStop.title}`
+            ? `Leg ${rIdx + 1}: ${fromStop.badge || fromStop.title} → ${toStop.badge || toStop.title}`
             : `Corridor ${rIdx + 1}`,
           desc: toStop ? `Connecting path towards ${toStop.title}.` : `Planned circulation corridor.`,
           notes: `Trace corridor "${route.title || `Corridor ${rIdx + 1}`}". Duration: ${route.duration || 3}s. Sequence position #${rIdx + 1}.`,
@@ -118,15 +120,16 @@ export class AnimationEngine {
           routeData: route
         });
 
-        // 3. Reveal destination stop if not yet visited
-        if (toStop && !visitedStops.has(toStop.id)) {
+        // 3. Reveal destination stop
+        if (toStop) {
           visitedStops.add(toStop.id);
+          lastStopId = toStop.id;
           this.steps.push({
             index: this.steps.length,
             type: 'stop',
             title: toStop.title,
             badge: toStop.badge,
-            subtitle: `Stop ${toStop.badge || visitedStops.size}`,
+            subtitle: `Arrival: ${toStop.title}`,
             desc: toStop.desc,
             notes: toStop.notes || `Arrival at ${toStop.title}.`,
             metric: toStop.metric || 'Campus Hub',
@@ -137,10 +140,12 @@ export class AnimationEngine {
             activeRouteId: route.id,
             activeZoneId: matchingZone ? matchingZone.id : null
           });
+        } else {
+          lastStopId = null;
         }
       });
 
-      // Include any remaining stops that were not connected to routes
+      // Include any remaining stops that were not visited
       stops.forEach(stop => {
         if (!visitedStops.has(stop.id)) {
           visitedStops.add(stop.id);
@@ -200,6 +205,75 @@ export class AnimationEngine {
         activeZoneId: null
       });
     }
+    // Keep currentStep bounded
+    if (this.currentStep >= this.steps.length) {
+      this.currentStep = Math.max(0, this.steps.length - 1);
+    }
+  }
+
+  showAllRoutes() {
+    this.allRoutesVisibleMode = true;
+    const { routes = [] } = this.state;
+    routes.forEach(route => {
+      const groupEl = document.querySelector(`.route-group[data-route-id="${route.id}"]`);
+      const pathEl = document.querySelector(`.route-path[data-route-id="${route.id}"]`);
+      if (groupEl) groupEl.style.display = '';
+      if (pathEl) {
+        pathEl.style.strokeDasharray = '';
+        pathEl.style.strokeDashoffset = '0';
+      }
+    });
+  }
+
+  updateRoutesVisibility(step, animate = true) {
+    if (!step) return;
+    const { routes = [] } = this.state;
+    const isSummary = step.type === 'summary';
+
+    routes.forEach(route => {
+      const groupEl = document.querySelector(`.route-group[data-route-id="${route.id}"]`);
+      const pathEl = document.querySelector(`.route-path[data-route-id="${route.id}"]`);
+      if (!groupEl || !pathEl) return;
+
+      // Locate the exact step where this corridor is introduced and animated
+      const routeStepIdx = this.steps.findIndex(s => s.type === 'route' && s.activeRouteId === route.id);
+
+      if (isSummary) {
+        // Master plan complete summary: all routes visible
+        groupEl.style.display = '';
+        pathEl.style.strokeDasharray = '';
+        pathEl.style.strokeDashoffset = '0';
+      } else if (routeStepIdx === -1) {
+        // Not part of the step tour
+        groupEl.style.display = 'none';
+      } else if (this.currentStep < routeStepIdx) {
+        // FUTURE ROUTE: Previous steps are happening!
+        // Keep route and its arrowheads/waypoints completely hidden!
+        groupEl.style.display = 'none';
+        pathEl.style.strokeDasharray = '';
+        pathEl.style.strokeDashoffset = '0';
+      } else if (this.currentStep === routeStepIdx) {
+        // ACTIVE ROUTE: Reveal group, start stroke at 0% if animating so it doesn't flash
+        groupEl.style.display = '';
+        if (animate) {
+          try {
+            const totalLen = pathEl.getTotalLength ? pathEl.getTotalLength() : 0;
+            if (totalLen > 0) {
+              pathEl.style.strokeDasharray = `${totalLen}`;
+              pathEl.style.strokeDashoffset = `${totalLen}`;
+            }
+          } catch (_) {}
+        } else {
+          pathEl.style.strokeDasharray = '';
+          pathEl.style.strokeDashoffset = '0';
+        }
+      } else {
+        // PAST ROUTE: Completed in previous step, keep displayed fully
+        groupEl.style.display = '';
+        pathEl.style.strokeDasharray = '';
+        pathEl.style.strokeDashoffset = '0';
+      }
+    });
   }
 
   goToStep(stepIndex, triggerAnimation = true) {
@@ -207,6 +281,7 @@ export class AnimationEngine {
     if (stepIndex >= this.steps.length) stepIndex = this.steps.length - 1;
 
     this.currentStep = stepIndex;
+    this.allRoutesVisibleMode = false;
     const step = this.steps[this.currentStep];
 
     if (this.activeAnimId) {
@@ -214,6 +289,9 @@ export class AnimationEngine {
       this.activeAnimId = null;
     }
     this.dom.travelerLayer.innerHTML = '';
+
+    // Apply strict progressive visibility: keep future routes hidden when previous steps are happening
+    this.updateRoutesVisibility(step, triggerAnimation);
 
     // Adjust camera framing
     if (step.focusPoint) {
@@ -275,11 +353,20 @@ export class AnimationEngine {
 
   play() {
     this.isPlaying = true;
-    this.runAutoPlay();
+    this.allRoutesVisibleMode = false;
+    document.body.classList.add('animation-playing');
+    if (this.currentStep >= this.steps.length - 1) {
+      this.goToStep(0, true);
+    } else {
+      // Re-trigger current step so animation plays from the beginning without skipping it
+      this.goToStep(this.currentStep, true);
+    }
+    this.scheduleNextAutoPlay();
   }
 
   pause() {
     this.isPlaying = false;
+    document.body.classList.remove('animation-playing');
     if (this.autoPlayTimer) {
       clearTimeout(this.autoPlayTimer);
       this.autoPlayTimer = null;
@@ -290,32 +377,42 @@ export class AnimationEngine {
     if (this.isPlaying) {
       this.pause();
     } else {
-      if (this.currentStep >= this.steps.length - 1) {
-        this.goToStep(0, true);
-      }
       this.play();
     }
     return this.isPlaying;
   }
 
-  runAutoPlay() {
+  scheduleNextAutoPlay() {
     if (!this.isPlaying) return;
-
-    if (this.currentStep < this.steps.length - 1) {
-      this.nextStep();
-      const currentStepObj = this.steps[this.currentStep];
-      let delay = 3200;
-      if (currentStepObj.type === 'route' && currentStepObj.routeData) {
-        delay = (currentStepObj.routeData.duration || 2.5) * 1000 + 1000;
-      }
-      delay = Math.max(delay / this.speedFactor, 1600);
-
-      this.autoPlayTimer = setTimeout(() => {
-        this.runAutoPlay();
-      }, delay);
-    } else {
-      this.pause();
+    if (this.autoPlayTimer) {
+      clearTimeout(this.autoPlayTimer);
+      this.autoPlayTimer = null;
     }
+
+    const currentStepObj = this.steps[this.currentStep];
+    let delay = 3200;
+    if (currentStepObj && currentStepObj.type === 'route' && currentStepObj.routeData) {
+      const dur = currentStepObj.routeData.duration || 2.5;
+      delay = (dur * 1000) + 1100;
+    } else if (currentStepObj && currentStepObj.type === 'stop') {
+      delay = 3400;
+    } else {
+      delay = 2800;
+    }
+    delay = Math.max(delay / this.speedFactor, 1600);
+
+    this.autoPlayTimer = setTimeout(() => {
+      if (!this.isPlaying) return;
+      if (this.currentStep < this.steps.length - 1) {
+        this.goToStep(this.currentStep + 1, true);
+        this.scheduleNextAutoPlay();
+      } else {
+        this.pause();
+        if (this.onPlaybackFinished) {
+          this.onPlaybackFinished();
+        }
+      }
+    }, delay);
   }
 
   updateVisualsForStep(step, animate = true) {
@@ -396,6 +493,7 @@ export class AnimationEngine {
         this.activeAnimId = requestAnimationFrame(animate);
       } else {
         pathEl.style.strokeDashoffset = '0';
+        pathEl.style.strokeDasharray = '';
         this.activeAnimId = null;
       }
     };

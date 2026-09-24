@@ -105,6 +105,11 @@ function initApp() {
     }
   );
 
+  animationEngine.onPlaybackFinished = () => {
+    updatePlayPauseIcon(false);
+    document.body.classList.remove('animation-playing');
+  };
+
   drawingTools = new DrawingTools(canvasEngine, appState, () => {
     renderAllLayers();
     updateSidebarLists();
@@ -154,11 +159,18 @@ function bindUIEvents() {
     [toolPan, toolPlace, toolLabel, toolPath, toolZone].forEach(btn => btn.classList.remove('active'));
     if (activeBtn) activeBtn.classList.add('active');
 
-    if (mode === 'path') drawingTools.startPathDrawing();
-    else if (mode === 'zone') drawingTools.startZoneDrawing();
-    else if (mode === 'place') drawingTools.showInstruction('Click on map to place a new Stop. Press Esc to cancel.');
-    else if (mode === 'label') drawingTools.showInstruction('Click on map to place a permanent Label. Press Esc to cancel.');
-    else drawingTools.cancelDrawing();
+    if (mode === 'path') {
+      animationEngine.showAllRoutes();
+      drawingTools.startPathDrawing();
+    } else if (mode === 'zone') {
+      drawingTools.startZoneDrawing();
+    } else if (mode === 'place') {
+      drawingTools.showInstruction('Click on map to place a new Stop. Press Esc to cancel.');
+    } else if (mode === 'label') {
+      drawingTools.showInstruction('Click on map to place a permanent Label. Press Esc to cancel.');
+    } else {
+      drawingTools.cancelDrawing();
+    }
   };
 
   toolPan.addEventListener('click', () => setTool('pan', toolPan));
@@ -230,7 +242,12 @@ function bindUIEvents() {
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
       if (targetId === 'stops') document.getElementById('tabStops').classList.add('active');
       if (targetId === 'labels') document.getElementById('tabLabels').classList.add('active');
-      if (targetId === 'routes') document.getElementById('tabRoutes').classList.add('active');
+      if (targetId === 'routes') {
+        document.getElementById('tabRoutes').classList.add('active');
+        if (!animationEngine.isPlaying && !presentationMode.isActive) {
+          animationEngine.showAllRoutes();
+        }
+      }
       if (targetId === 'zones') document.getElementById('tabZones').classList.add('active');
       if (targetId === 'settings') document.getElementById('tabSettings').classList.add('active');
     });
@@ -241,6 +258,9 @@ function bindUIEvents() {
   document.getElementById('btnAddLabelQuick').addEventListener('click', () => setTool('label', toolLabel));
   document.getElementById('btnDrawRouteQuick').addEventListener('click', () => setTool('path', toolPath));
   document.getElementById('btnDrawZoneQuick').addEventListener('click', () => setTool('zone', toolZone));
+  document.getElementById('btnShowAllRoutes')?.addEventListener('click', () => {
+    animationEngine.showAllRoutes();
+  });
 
   // Settings Checkboxes
   chkShowDialogOnFocus.addEventListener('change', (e) => {
@@ -862,6 +882,16 @@ function renderRoutesSvg() {
       }
     });
   });
+
+  // Keep route visibility strictly in sync with the current animation step
+  if (animationEngine && animationEngine.steps && animationEngine.steps.length > 0) {
+    if (animationEngine.allRoutesVisibleMode) {
+      animationEngine.showAllRoutes();
+    } else {
+      const curStep = animationEngine.steps[animationEngine.currentStep] || animationEngine.steps[0];
+      animationEngine.updateRoutesVisibility(curStep, false);
+    }
+  }
 }
 
 function renderZonesSvg() {
@@ -1137,95 +1167,108 @@ function updateSidebarLists() {
       </div>
     `;
 
-    // Up and Down reorder button clicks
-    card.querySelector('.btn-move-up')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (rIdx > 0) {
-        const item = appState.routes.splice(rIdx, 1)[0];
-        appState.routes.splice(rIdx - 1, 0, item);
-        animationEngine.compileSteps();
-        renderTimelinePills();
-        renderRoutesSvg();
-        updateSidebarLists();
-      }
-    });
+  function handleRouteReordered(movedRouteId) {
+    animationEngine.pause();
+    updatePlayPauseIcon(false);
 
-    card.querySelector('.btn-move-down')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (rIdx < appState.routes.length - 1) {
-        const item = appState.routes.splice(rIdx, 1)[0];
-        appState.routes.splice(rIdx + 1, 0, item);
-        animationEngine.compileSteps();
-        renderTimelinePills();
-        renderRoutesSvg();
-        updateSidebarLists();
-      }
-    });
+    animationEngine.compileSteps();
+    renderTimelinePills();
+    renderRoutesSvg();
+    updateSidebarLists();
 
-    // Drag and drop event handlers
-    card.addEventListener('dragstart', (e) => {
-      if (e.target.closest('input') || e.target.closest('select') || e.target.closest('button')) {
-        e.preventDefault();
-        return;
-      }
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', rIdx.toString());
-      setTimeout(() => card.classList.add('route-card-dragging'), 0);
-    });
+    // Immediately jump camera and active playback step to this reordered route so it is framed & ready to animate
+    const targetIdx = animationEngine.steps.findIndex(
+      s => s.type === 'route' && s.activeRouteId === movedRouteId
+    );
+    if (targetIdx !== -1) {
+      animationEngine.goToStep(targetIdx, true);
+    } else {
+      animationEngine.goToStep(0, false);
+    }
+  }
 
-    card.addEventListener('dragover', (e) => {
+  // Up and Down reorder button clicks
+  card.querySelector('.btn-move-up')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (rIdx > 0) {
+      const item = appState.routes.splice(rIdx, 1)[0];
+      appState.routes.splice(rIdx - 1, 0, item);
+      handleRouteReordered(item.id);
+    }
+  });
+
+  card.querySelector('.btn-move-down')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (rIdx < appState.routes.length - 1) {
+      const item = appState.routes.splice(rIdx, 1)[0];
+      appState.routes.splice(rIdx + 1, 0, item);
+      handleRouteReordered(item.id);
+    }
+  });
+
+  // Drag and drop event handlers
+  card.addEventListener('dragstart', (e) => {
+    if (e.target.closest('input') || e.target.closest('select') || e.target.closest('button')) {
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      const rect = card.getBoundingClientRect();
-      const relY = e.clientY - rect.top;
-      if (relY < rect.height / 2) {
-        card.classList.add('route-drop-before');
-        card.classList.remove('route-drop-after');
-      } else {
-        card.classList.add('route-drop-after');
-        card.classList.remove('route-drop-before');
-      }
+      return;
+    }
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', rIdx.toString());
+    setTimeout(() => card.classList.add('route-card-dragging'), 0);
+  });
+
+  card.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = card.getBoundingClientRect();
+    const relY = e.clientY - rect.top;
+    if (relY < rect.height / 2) {
+      card.classList.add('route-drop-before');
+      card.classList.remove('route-drop-after');
+    } else {
+      card.classList.add('route-drop-after');
+      card.classList.remove('route-drop-before');
+    }
+  });
+
+  card.addEventListener('dragleave', () => {
+    card.classList.remove('route-drop-before', 'route-drop-after');
+  });
+
+  card.addEventListener('drop', (e) => {
+    e.preventDefault();
+    card.classList.remove('route-drop-before', 'route-drop-after');
+    const srcIdxStr = e.dataTransfer.getData('text/plain');
+    const srcIdx = parseInt(srcIdxStr, 10);
+    if (isNaN(srcIdx) || srcIdx === rIdx) return;
+
+    const rect = card.getBoundingClientRect();
+    const relY = e.clientY - rect.top;
+    let targetIdx = relY < rect.height / 2 ? rIdx : rIdx + 1;
+    if (srcIdx < targetIdx) {
+      targetIdx--;
+    }
+
+    const moved = appState.routes.splice(srcIdx, 1)[0];
+    appState.routes.splice(targetIdx, 0, moved);
+    handleRouteReordered(moved.id);
+  });
+
+  card.addEventListener('dragend', () => {
+    document.querySelectorAll('.route-card').forEach(c => {
+      c.classList.remove('route-card-dragging', 'route-drop-before', 'route-drop-after');
     });
+  });
 
-    card.addEventListener('dragleave', () => {
-      card.classList.remove('route-drop-before', 'route-drop-after');
-    });
-
-    card.addEventListener('drop', (e) => {
-      e.preventDefault();
-      card.classList.remove('route-drop-before', 'route-drop-after');
-      const srcIdxStr = e.dataTransfer.getData('text/plain');
-      const srcIdx = parseInt(srcIdxStr, 10);
-      if (isNaN(srcIdx) || srcIdx === rIdx) return;
-
-      const rect = card.getBoundingClientRect();
-      const relY = e.clientY - rect.top;
-      let targetIdx = relY < rect.height / 2 ? rIdx : rIdx + 1;
-      if (srcIdx < targetIdx) {
-        targetIdx--;
-      }
-
-      const moved = appState.routes.splice(srcIdx, 1)[0];
-      appState.routes.splice(targetIdx, 0, moved);
-
-      animationEngine.compileSteps();
-      renderTimelinePills();
-      renderRoutesSvg();
-      updateSidebarLists();
-    });
-
-    card.addEventListener('dragend', () => {
-      document.querySelectorAll('.route-card').forEach(c => {
-        c.classList.remove('route-card-dragging', 'route-drop-before', 'route-drop-after');
-      });
-    });
-
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.delete') || e.target.closest('input') || e.target.closest('select') || e.target.closest('button')) return;
-      if (route.points && route.points.length >= 2) {
-        canvasEngine.fitBounds(route.points, 80, 500);
-      }
-    });
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('.delete') || e.target.closest('input') || e.target.closest('select') || e.target.closest('button')) return;
+    const stepIdx = animationEngine.steps.findIndex(s => s.type === 'route' && s.activeRouteId === route.id);
+    if (stepIdx !== -1) {
+      animationEngine.goToStep(stepIdx, true);
+    } else if (route.points && route.points.length >= 2) {
+      canvasEngine.fitBounds(route.points, 80, 500);
+    }
+  });
 
     card.querySelector('.edit-route-title').addEventListener('input', (e) => {
       route.title = e.target.value;

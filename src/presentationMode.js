@@ -87,6 +87,7 @@ export class PresentationMode {
 
   enter() {
     this.isActive = true;
+    document.body.classList.add('presentation-active');
     this.overlay.classList.remove('hidden');
 
     // Request browser fullscreen if available
@@ -104,6 +105,7 @@ export class PresentationMode {
 
   exit() {
     this.isActive = false;
+    document.body.classList.remove('presentation-active');
     this.overlay.classList.add('hidden');
 
     if (document.fullscreenElement) {

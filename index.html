@@ -176,7 +176,10 @@
           <div id="tabRoutes" class="tab-pane">
             <div class="pane-header">
               <h3>Route Corridors</h3>
-              <button id="btnDrawRouteQuick" class="mini-btn">+ Draw Route</button>
+              <div class="pane-header-actions">
+                <button id="btnShowAllRoutes" class="mini-btn-secondary" title="Show all corridors simultaneously on map for editing">Show All</button>
+                <button id="btnDrawRouteQuick" class="mini-btn">+ Draw Route</button>
+              </div>
             </div>
             <p class="pane-help">Planned corridors with directional arrows. <strong>Drag cards or tap ▲ / ▼</strong> to customize visualization sequence order. Click any node on the map to split or branch.</p>
             <div id="routesList" class="items-list routes-reorderable-list">

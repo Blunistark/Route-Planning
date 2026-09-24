@@ -356,6 +356,37 @@ body {
   background: #1D4ED8;
 }
 
+.mini-btn-secondary {
+  background: #1E293B;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-formal);
+  font-family: var(--font-formal);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mini-btn-secondary:hover {
+  background: #334155;
+  color: #FFFFFF;
+  border-color: #64748B;
+}
+
+.pane-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Hide waypoint editing handles during animation playback or presentation mode */
+body.animation-playing .waypoint-node-group,
+body.presentation-active .waypoint-node-group {
+  display: none !important;
+}
+
 /* Item Cards in Sidebar */
 .items-list {
   display: flex;
