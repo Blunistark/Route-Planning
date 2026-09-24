@@ -24,11 +24,25 @@ export class AnimationEngine {
     this.calloutTag1 = document.getElementById('calloutTag1');
     this.calloutTag2 = document.getElementById('calloutTag2');
 
+    // Stage Node Note Callout (for notes on particular nodes when animation starts / traces)
+    this.nodeNoteCallout = document.getElementById('stageNodeNoteCallout');
+    this.nodeNoteNodeLabel = document.getElementById('nodeNoteNodeLabel');
+    this.nodeNoteBody = document.getElementById('nodeNoteBody');
+    this.nodeNoteTimeout = null;
+
     const btnCloseCallout = document.getElementById('btnCloseCallout');
     if (btnCloseCallout) {
       btnCloseCallout.addEventListener('click', (e) => {
         e.stopPropagation();
         this.hideCalloutDialog();
+      });
+    }
+
+    const btnCloseNodeNote = document.getElementById('btnCloseNodeNote');
+    if (btnCloseNodeNote) {
+      btnCloseNodeNote.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.hideNodeNoteCallout();
       });
     }
   }
@@ -305,8 +319,18 @@ export class AnimationEngine {
     // Callout dialog management
     if (step.type === 'stop' && step.activeStopData && this.state.showDialogOnFocus !== false) {
       this.showCalloutDialog(step.activeStopData);
+      this.hideNodeNoteCallout();
+    } else if (step.type === 'route' && step.routeData && step.routeData.points) {
+      this.hideCalloutDialog();
+      const p0 = step.routeData.points[0];
+      if (p0 && p0.note && p0.showOnStart !== false) {
+        this.showNodeNoteCallout(p0, 0, step.routeData.title, 5500);
+      } else {
+        this.hideNodeNoteCallout();
+      }
     } else {
       this.hideCalloutDialog();
+      this.hideNodeNoteCallout();
     }
 
     // Apply visual highlights
@@ -334,6 +358,36 @@ export class AnimationEngine {
   hideCalloutDialog() {
     if (this.calloutDialog) {
       this.calloutDialog.classList.add('hidden');
+    }
+  }
+
+  showNodeNoteCallout(pt, nodeIdx, routeTitle, autoDismissMs = 5000) {
+    if (!this.nodeNoteCallout) return;
+    if (this.nodeNoteNodeLabel) {
+      this.nodeNoteNodeLabel.textContent = `${routeTitle || 'Corridor'} • Node #${nodeIdx + 1}`;
+    }
+    if (this.nodeNoteBody) {
+      this.nodeNoteBody.textContent = pt.note || '';
+    }
+    this.nodeNoteCallout.style.left = `${pt.x}px`;
+    this.nodeNoteCallout.style.top = `${pt.y}px`;
+    this.nodeNoteCallout.classList.remove('hidden');
+
+    if (this.nodeNoteTimeout) clearTimeout(this.nodeNoteTimeout);
+    if (autoDismissMs > 0) {
+      this.nodeNoteTimeout = setTimeout(() => {
+        this.hideNodeNoteCallout();
+      }, autoDismissMs);
+    }
+  }
+
+  hideNodeNoteCallout() {
+    if (this.nodeNoteCallout) {
+      this.nodeNoteCallout.classList.add('hidden');
+    }
+    if (this.nodeNoteTimeout) {
+      clearTimeout(this.nodeNoteTimeout);
+      this.nodeNoteTimeout = null;
     }
   }
 
@@ -470,6 +524,16 @@ export class AnimationEngine {
       <circle cx="0" cy="0" r="5" fill="#FFFFFF" stroke="${color}" stroke-width="2" />
     `;
 
+    // 1. Trigger node note at the start of animation if start node has a note
+    if (route.points && route.points[0] && route.points[0].note && route.points[0].showOnStart !== false) {
+      this.showNodeNoteCallout(route.points[0], 0, route.title, 5500);
+    }
+
+    // 2. Track subsequent waypoints that have notes to trigger as traveler reaches them
+    const intermediateWaypoints = (route.points || [])
+      .map((pt, idx) => ({ pt, idx, triggered: idx === 0 }))
+      .filter(item => item.pt && item.pt.note);
+
     const duration = ((route.duration || 2.8) * 1000) / this.speedFactor;
     const startTime = performance.now();
 
@@ -487,6 +551,17 @@ export class AnimationEngine {
       if (currentDistance >= 0 && currentDistance <= totalLength) {
         const point = pathEl.getPointAtLength(currentDistance);
         travelerGroup.setAttribute('transform', `translate(${point.x}, ${point.y})`);
+
+        // Check if traveler has arrived at an intermediate waypoint with a note
+        intermediateWaypoints.forEach(wp => {
+          if (!wp.triggered) {
+            const dist = Math.hypot(point.x - wp.pt.x, point.y - wp.pt.y);
+            if (dist < 32) {
+              wp.triggered = true;
+              this.showNodeNoteCallout(wp.pt, wp.idx, route.title, 4500);
+            }
+          }
+        });
       }
 
       if (progress < 1.0) {

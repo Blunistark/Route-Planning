@@ -332,6 +332,19 @@
               </div>
               <div class="callout-pointer-arrow"></div>
             </div>
+
+            <!-- STAGE NODE NOTE CALLOUT (Pops up on particular waypoint nodes when animation starts / traces) -->
+            <div id="stageNodeNoteCallout" class="stage-node-note-callout hidden">
+              <div class="node-note-header">
+                <div class="node-note-header-left">
+                  <span class="node-note-badge">📌 NODE NOTE</span>
+                  <span id="nodeNoteNodeLabel" class="node-note-label">Node #1</span>
+                </div>
+                <button id="btnCloseNodeNote" class="node-note-close-btn" title="Dismiss note">✕</button>
+              </div>
+              <div id="nodeNoteBody" class="node-note-body"></div>
+              <div class="node-note-pointer-arrow"></div>
+            </div>
           </div>
         </div>
 
@@ -342,6 +355,27 @@
             <button id="btnCloseWaypointPopover" class="popover-close-btn" title="Close">✕</button>
           </div>
           <div class="popover-body">
+            <!-- Node Note Creation & Editing -->
+            <div class="popover-note-box">
+              <div class="popover-note-header">
+                <span class="popover-note-label">📝 Node Note / Annotation</span>
+                <span class="popover-note-hint">Triggers when animation starts</span>
+              </div>
+              <textarea id="waypointNodeNoteInput" class="popover-note-textarea" rows="2" placeholder="Write a note for this node (e.g. Departure checkpoint, Gate arrival, etc.)..."></textarea>
+              <div class="popover-note-row">
+                <label class="popover-chk-label" title="When checked, this note displays right when the animation starts or traces this node">
+                  <input type="checkbox" id="chkWaypointShowOnStart" checked>
+                  <span>Show when animation starts</span>
+                </label>
+                <div class="popover-note-btn-group">
+                  <button id="btnClearWaypointNote" class="mini-btn-secondary danger hidden" type="button">✕ Clear</button>
+                  <button id="btnSaveWaypointNote" class="mini-btn-primary" type="button">💾 Save Note</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="popover-divider"><span>OR PATH ACTIONS</span></div>
+
             <button id="btnPopoverSplitRoute" class="popover-action-btn" type="button">
               <span class="popover-action-title">✂ Split Path Here</span>
               <span class="popover-action-desc">Divides corridor into two separate connected routes</span>

@@ -537,14 +537,55 @@ function bindUIEvents() {
     if (tabLabels) tabLabels.click();
   });
 
-  // Waypoint Popover Actions (Splitting and Branching Paths)
+  // Waypoint Popover Actions (Node Notes, Splitting and Branching Paths)
   const btnCloseWaypointPopover = document.getElementById('btnCloseWaypointPopover');
   const btnPopoverSplitRoute = document.getElementById('btnPopoverSplitRoute');
   const btnPopoverBranchRoute = document.getElementById('btnPopoverBranchRoute');
+  const btnSaveWaypointNote = document.getElementById('btnSaveWaypointNote');
+  const btnClearWaypointNote = document.getElementById('btnClearWaypointNote');
 
   btnCloseWaypointPopover?.addEventListener('click', (e) => {
     e.stopPropagation();
     hideWaypointPopover();
+  });
+
+  btnSaveWaypointNote?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!activeWaypointContext) return;
+    const { route, waypointIdx } = activeWaypointContext;
+    const noteInput = document.getElementById('waypointNodeNoteInput');
+    const chkShow = document.getElementById('chkWaypointShowOnStart');
+    const text = (noteInput ? noteInput.value : '').trim();
+    const showOnStart = chkShow ? chkShow.checked : true;
+
+    if (route && route.points && route.points[waypointIdx]) {
+      if (text) {
+        route.points[waypointIdx].note = text;
+        route.points[waypointIdx].showOnStart = showOnStart;
+        showToast(`Saved note on Node #${waypointIdx + 1}!`, '📝');
+      } else {
+        delete route.points[waypointIdx].note;
+        delete route.points[waypointIdx].showOnStart;
+        showToast(`Cleared note on Node #${waypointIdx + 1}`, '🗑');
+      }
+      syncAppStateReferences();
+      renderRoutesSvg();
+      hideWaypointPopover();
+    }
+  });
+
+  btnClearWaypointNote?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!activeWaypointContext) return;
+    const { route, waypointIdx } = activeWaypointContext;
+    if (route && route.points && route.points[waypointIdx]) {
+      delete route.points[waypointIdx].note;
+      delete route.points[waypointIdx].showOnStart;
+      syncAppStateReferences();
+      renderRoutesSvg();
+      hideWaypointPopover();
+      showToast(`Cleared note on Node #${waypointIdx + 1}`, '🗑');
+    }
   });
 
   btnPopoverSplitRoute?.addEventListener('click', (e) => {
@@ -788,10 +829,28 @@ function showWaypointPopover(route, waypointIdx, pt) {
   const popover = document.getElementById('waypointContextPopover');
   const title = document.getElementById('waypointPopoverTitle');
   const container = document.getElementById('canvasContainer');
+  const noteInput = document.getElementById('waypointNodeNoteInput');
+  const chkShow = document.getElementById('chkWaypointShowOnStart');
+  const btnClear = document.getElementById('btnClearWaypointNote');
   if (!popover || !title || !container) return;
 
   activeWaypointContext = { route, waypointIdx, pt };
   title.textContent = `${route.title || 'Corridor'} (Node #${waypointIdx + 1})`;
+
+  // Populate node note input and checkbox state
+  if (noteInput) {
+    noteInput.value = pt.note || '';
+  }
+  if (chkShow) {
+    chkShow.checked = pt.showOnStart !== false;
+  }
+  if (btnClear) {
+    if (pt.note) {
+      btnClear.classList.remove('hidden');
+    } else {
+      btnClear.classList.add('hidden');
+    }
+  }
 
   // Convert map image coordinates to screen coordinates relative to canvasContainer
   const screenPt = canvasEngine.mapToScreen(pt.x, pt.y);
@@ -800,8 +859,8 @@ function showWaypointPopover(route, waypointIdx, pt) {
   let x = screenPt.x - contRect.left;
   let y = screenPt.y - contRect.top;
 
-  const popoverW = 260;
-  const popoverH = 145;
+  const popoverW = 320;
+  const popoverH = 205;
 
   // Clamp horizontally so popover stays comfortably within container
   x = Math.max(popoverW / 2 + 12, Math.min(contRect.width - popoverW / 2 - 12, x));
@@ -862,8 +921,17 @@ function renderRoutesSvg() {
         />
     `;
 
-    // Render interactive waypoint handles with touch targets for splitting and branching
+    // Render interactive waypoint handles with touch targets for splitting, branching, and node notes
     route.points.forEach((pt, pIdx) => {
+      const hasNote = !!pt.note;
+      const noteBadgeSvg = hasNote ? `
+        <!-- Note Indicator Flag on Node -->
+        <g class="waypoint-note-flag" pointer-events="none">
+          <circle cx="${pt.x}" cy="${pt.y - 12}" r="7" fill="#F59E0B" stroke="#0F172A" stroke-width="1.2" />
+          <text x="${pt.x}" y="${pt.y - 9}" font-size="8" font-family="Plus Jakarta Sans, sans-serif" font-weight="bold" fill="#000000" text-anchor="middle">📌</text>
+        </g>
+      ` : '';
+
       svgHtml += `
         <g class="waypoint-node-group" data-route-id="${route.id}" data-waypoint-idx="${pIdx}">
           <!-- Generous touch hit area (36px diameter) for mobile phones and precise clicks -->
@@ -873,14 +941,16 @@ function renderRoutesSvg() {
             data-waypoint-idx="${pIdx}"
             fill="transparent"
             style="cursor: pointer;"
-          />
+          >
+            <title>${route.title || 'Corridor'} Node #${pIdx + 1}${hasNote ? `: "${pt.note}" (triggers when animation starts)` : ' (Click to add note, split or branch)'}</title>
+          </circle>
           <!-- Visual accent ring -->
           <circle cx="${pt.x}" cy="${pt.y}" r="8"
             class="waypoint-halo"
-            stroke="${color}"
-            stroke-width="1.5"
+            stroke="${hasNote ? '#F59E0B' : color}"
+            stroke-width="${hasNote ? '2' : '1.5'}"
             fill="none"
-            opacity="0.4"
+            opacity="${hasNote ? '0.75' : '0.4'}"
             pointer-events="none"
           />
           <!-- Core waypoint node -->
@@ -888,11 +958,12 @@ function renderRoutesSvg() {
             class="waypoint-handle"
             data-route-id="${route.id}"
             data-waypoint-idx="${pIdx}"
-            fill="#FFFFFF"
-            stroke="${color}"
+            fill="${hasNote ? '#FEF3C7' : '#FFFFFF'}"
+            stroke="${hasNote ? '#F59E0B' : color}"
             stroke-width="2.5"
             style="cursor: pointer;"
           />
+          ${noteBadgeSvg}
         </g>
       `;
     });

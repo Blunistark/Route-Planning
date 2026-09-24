@@ -665,6 +665,114 @@ export class ExportService {
           ctx.fill();
           ctx.restore();
         }
+
+        // Waypoint Note Flags on Nodes
+        points.forEach((p, pIdx) => {
+          if (p && p.note) {
+            const screenP = toScreen(p);
+            ctx.save();
+            ctx.fillStyle = '#F59E0B';
+            ctx.beginPath();
+            ctx.arc(screenP.x, screenP.y - 12, 6 * effScale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#0F172A';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+            ctx.restore();
+          }
+        });
+
+        // 2b. Draw Node Note Callout when animation starts or traces this route
+        if (isCurrentRoute && points && points.length > 0) {
+          points.forEach((p, pIdx) => {
+            if (p && p.note) {
+              const shouldShow = (pIdx === 0)
+                ? (progress >= 0.04 && progress <= 0.88)
+                : (p.showOnStart ? (progress >= 0.04 && progress <= 0.88) : false);
+
+              if (shouldShow) {
+                const screenP = toScreen(p);
+                const noteBoxW = 310;
+                const noteBoxH = 72;
+                let noteX = Math.round(screenP.x - noteBoxW / 2);
+                noteX = Math.max(20, Math.min(width - noteBoxW - 20, noteX));
+                let noteY = Math.round(screenP.y - 20 - noteBoxH);
+                let placeAbove = true;
+                if (noteY < 24) {
+                  noteY = Math.round(screenP.y + 24);
+                  placeAbove = false;
+                }
+
+                const noteAlpha = Math.min(1.0, Math.max(0.0, (progress - 0.04) / 0.12));
+
+                ctx.save();
+                ctx.globalAlpha = noteAlpha;
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
+                ctx.shadowBlur = 18;
+                ctx.shadowOffsetY = 6;
+
+                // Box background
+                ctx.fillStyle = '#0F172A';
+                ctx.fillRect(noteX, noteY, noteBoxW, noteBoxH);
+
+                ctx.shadowColor = 'transparent';
+                ctx.strokeStyle = '#F59E0B';
+                ctx.lineWidth = 1.8;
+                ctx.strokeRect(noteX, noteY, noteBoxW, noteBoxH);
+
+                // Header pill
+                ctx.fillStyle = '#F59E0B';
+                ctx.font = 'bold 11px "Plus Jakarta Sans", Segoe UI, sans-serif';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                ctx.fillText(`📌 NODE #${pIdx + 1} NOTE • ${route.title || 'Corridor'}`, noteX + 10, noteY + 8);
+
+                // Note text
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '12px "Plus Jakarta Sans", Segoe UI, sans-serif';
+                const words = String(p.note || '').split(' ');
+                let l1 = '', l2 = '';
+                for (const w of words) {
+                  const test1 = l1 ? l1 + ' ' + w : w;
+                  if (ctx.measureText(test1).width < noteBoxW - 20 && !l2) {
+                    l1 = test1;
+                  } else {
+                    l2 = l2 ? l2 + ' ' + w : w;
+                  }
+                }
+                ctx.fillText(l1, noteX + 10, noteY + 28);
+                if (l2) {
+                  let l2Text = l2;
+                  while (ctx.measureText(l2Text + '...').width > noteBoxW - 20 && l2Text.length > 5) {
+                    l2Text = l2Text.substring(0, l2Text.length - 3);
+                  }
+                  ctx.fillText(l2Text + (l2Text.length < l2.length ? '...' : ''), noteX + 10, noteY + 48);
+                }
+
+                // Pointer arrow
+                const arrowX = Math.max(noteX + 16, Math.min(noteX + noteBoxW - 16, screenP.x));
+                ctx.beginPath();
+                if (placeAbove) {
+                  ctx.moveTo(arrowX - 8, noteY + noteBoxH);
+                  ctx.lineTo(arrowX + 8, noteY + noteBoxH);
+                  ctx.lineTo(arrowX, noteY + noteBoxH + 10);
+                } else {
+                  ctx.moveTo(arrowX - 8, noteY);
+                  ctx.lineTo(arrowX + 8, noteY);
+                  ctx.lineTo(arrowX, noteY - 10);
+                }
+                ctx.closePath();
+                ctx.fillStyle = '#0F172A';
+                ctx.fill();
+                ctx.strokeStyle = '#F59E0B';
+                ctx.lineWidth = 1.8;
+                ctx.stroke();
+
+                ctx.restore();
+              }
+            }
+          });
+        }
       });
 
       // 3. Draw Permanent Labels
