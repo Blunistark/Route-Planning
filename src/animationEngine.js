@@ -24,7 +24,6 @@ export class AnimationEngine {
 
     // Stage Node Note Callout (for notes on particular nodes when animation starts / traces)
     this.nodeNoteCallout = document.getElementById('stageNodeNoteCallout');
-    this.nodeNoteNodeLabel = document.getElementById('nodeNoteNodeLabel');
     this.nodeNoteBody = document.getElementById('nodeNoteBody');
     this.nodeNoteTimeout = null;
 
@@ -322,7 +321,7 @@ export class AnimationEngine {
       this.hideCalloutDialog();
       const p0 = step.routeData.points[0];
       if (p0 && p0.note && p0.showOnStart !== false) {
-        this.showNodeNoteCallout(p0, 0, step.routeData.title, 5500);
+        this.showNodeNoteCallout(p0, 5500);
       } else {
         this.hideNodeNoteCallout();
       }
@@ -357,11 +356,8 @@ export class AnimationEngine {
     }
   }
 
-  showNodeNoteCallout(pt, nodeIdx, routeTitle, autoDismissMs = 5000) {
+  showNodeNoteCallout(pt, autoDismissMs = 5000) {
     if (!this.nodeNoteCallout) return;
-    if (this.nodeNoteNodeLabel) {
-      this.nodeNoteNodeLabel.textContent = `${routeTitle || 'Corridor'} • Node #${nodeIdx + 1}`;
-    }
     if (this.nodeNoteBody) {
       this.nodeNoteBody.textContent = pt.note || '';
     }
@@ -522,7 +518,7 @@ export class AnimationEngine {
 
     // 1. Trigger node note at the start of animation if start node has a note
     if (route.points && route.points[0] && route.points[0].note && route.points[0].showOnStart !== false) {
-      this.showNodeNoteCallout(route.points[0], 0, route.title, 5500);
+      this.showNodeNoteCallout(route.points[0], 5500);
     }
 
     // 2. Track subsequent waypoints that have notes to trigger as traveler reaches them
@@ -554,7 +550,7 @@ export class AnimationEngine {
             const dist = Math.hypot(point.x - wp.pt.x, point.y - wp.pt.y);
             if (dist < 32) {
               wp.triggered = true;
-              this.showNodeNoteCallout(wp.pt, wp.idx, route.title, 4500);
+              this.showNodeNoteCallout(wp.pt, 4500);
             }
           }
         });

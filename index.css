@@ -1106,9 +1106,9 @@ body.presentation-active .waypoint-node-group {
   z-index: 52;
   pointer-events: auto;
   transform: translate(-50%, -100%);
-  margin-top: -20px;
-  width: 320px;
-  max-width: 88vw;
+  margin-top: -16px;
+  max-width: 320px;
+  width: max-content;
   background: #0F172A;
   border: 1.8px solid #F59E0B;
   border-radius: 6px;
@@ -1123,47 +1123,18 @@ body.presentation-active .waypoint-node-group {
   transform: translate(-50%, -92%);
 }
 
-.node-note-header {
-  background: #1E293B;
-  border-bottom: 1px solid #334155;
-  padding: 6px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-top-left-radius: 5px;
-  border-top-right-radius: 5px;
-}
-
-.node-note-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.node-note-badge {
-  background: #F59E0B;
-  color: #0F172A;
-  font-size: 0.65rem;
-  font-weight: 800;
-  padding: 2px 6px;
-  border-radius: 3px;
-  letter-spacing: 0.05em;
-}
-
-.node-note-label {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #E2E8F0;
-}
-
 .node-note-close-btn {
+  position: absolute;
+  top: 4px;
+  right: 6px;
   background: transparent;
   border: none;
   color: #94A3B8;
   cursor: pointer;
-  font-size: 0.9rem;
-  padding: 0 4px;
+  font-size: 0.8rem;
+  padding: 0 2px;
   line-height: 1;
+  z-index: 2;
 }
 
 .node-note-close-btn:hover {
@@ -1171,11 +1142,13 @@ body.presentation-active .waypoint-node-group {
 }
 
 .node-note-body {
-  padding: 10px 14px;
-  font-size: 0.88rem;
+  padding: 8px 24px 8px 12px;
+  font-size: 0.86rem;
   color: #FFFFFF;
-  line-height: 1.45;
+  line-height: 1.4;
   font-weight: 500;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .node-note-pointer-arrow {
