@@ -191,7 +191,7 @@
                 <button id="btnDrawRouteQuick" class="mini-btn">+ Draw Route</button>
               </div>
             </div>
-            <p class="pane-help">Planned corridors with directional arrows. <strong>Drag cards or tap ▲ / ▼</strong> to customize visualization sequence order. Click any node on the map to split or branch.</p>
+            <p class="pane-help">Planned corridors with directional arrows. Customize each corridor's <strong>Route Color</strong> below, or drag cards / tap ▲ / ▼ to reorder sequence.</p>
             <div id="routesList" class="items-list routes-reorderable-list">
               <!-- Dynamically populated with sequence order badges and drag handles -->
             </div>
@@ -361,6 +361,21 @@
                   <button id="btnClearWaypointNote" class="mini-btn-secondary danger hidden" type="button">✕ Clear</button>
                   <button id="btnSaveWaypointNote" class="mini-btn-primary" type="button">💾 Save Note</button>
                 </div>
+              </div>
+            </div>
+
+            <!-- Corridor Color Selector -->
+            <div class="popover-color-box">
+              <div class="popover-color-header">
+                <span class="popover-color-label">🎨 Corridor Color</span>
+                <span id="popoverRouteColorHex" class="popover-color-hex">#DC2626</span>
+              </div>
+              <div class="popover-color-swatches-row">
+                <div class="popover-color-swatches" id="popoverRouteSwatches"></div>
+                <label class="popover-color-picker-label" title="Custom Hex Color">
+                  <input type="color" id="popoverRouteColorPicker" class="popover-color-picker" value="#DC2626">
+                  <span class="popover-color-picker-icon">🎨</span>
+                </label>
               </div>
             </div>
 

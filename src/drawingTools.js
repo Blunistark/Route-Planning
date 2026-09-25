@@ -236,11 +236,12 @@ export class DrawingTools {
   }
 
   // --- Route Path Drawing ---
-  startPathDrawing(initialPoints = [], sourceTitle = null) {
+  startPathDrawing(initialPoints = [], sourceTitle = null, sourceColor = null) {
     this.isDrawing = true;
     this.drawingType = 'path';
     this.activePoints = initialPoints ? [...initialPoints] : [];
     this.branchSourceTitle = sourceTitle;
+    this.branchSourceColor = sourceColor;
 
     if (this.activePoints.length > 0) {
       this.showInstruction(`Branching from "${sourceTitle || 'Corridor'}". Click map to place next waypoints. Press ✓ Done when finished.`);
@@ -373,7 +374,7 @@ export class DrawingTools {
     }
 
     const branchName = route.title ? `${route.title} (${ptLabel})` : 'Corridor Branch';
-    this.startPathDrawing([{ x: branchPoint.x, y: branchPoint.y }], branchName);
+    this.startPathDrawing([{ x: branchPoint.x, y: branchPoint.y }], branchName, route.color || null);
   }
 
   // --- Zone Boundary Drawing ---
@@ -469,12 +470,15 @@ export class DrawingTools {
         ? `Branch of ${this.branchSourceTitle}`
         : `Route Corridor ${routeNum}`;
 
+      const routeColors = ['#DC2626', '#2563EB', '#16A34A', '#D97706', '#7C3AED', '#0284C7', '#E11D48'];
+      const chosenColor = this.branchSourceColor || routeColors[this.state.routes.length % routeColors.length];
+
       const newRoute = {
         id: `route-${Date.now()}`,
         fromStopId: fromStopId,
         toStopId: toStopId,
         title: title,
-        color: '#DC2626',
+        color: chosenColor,
         strokeWidth: 4,
         style: 'formal',
         avatar: 'dot',

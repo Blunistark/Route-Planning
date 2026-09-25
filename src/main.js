@@ -537,12 +537,20 @@ function bindUIEvents() {
     if (tabLabels) tabLabels.click();
   });
 
-  // Waypoint Popover Actions (Node Notes, Splitting and Branching Paths)
+  // Waypoint Popover Actions (Node Notes, Splitting and Branching Paths, Corridor Colors)
   const btnCloseWaypointPopover = document.getElementById('btnCloseWaypointPopover');
   const btnPopoverSplitRoute = document.getElementById('btnPopoverSplitRoute');
   const btnPopoverBranchRoute = document.getElementById('btnPopoverBranchRoute');
   const btnSaveWaypointNote = document.getElementById('btnSaveWaypointNote');
   const btnClearWaypointNote = document.getElementById('btnClearWaypointNote');
+  const popoverRouteColorPicker = document.getElementById('popoverRouteColorPicker');
+
+  popoverRouteColorPicker?.addEventListener('input', (e) => {
+    e.stopPropagation();
+    if (activeWaypointContext && activeWaypointContext.route) {
+      setRouteColor(activeWaypointContext.route, e.target.value);
+    }
+  });
 
   btnCloseWaypointPopover?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -822,6 +830,93 @@ function renderStopsPins() {
   });
 }
 
+// Route color presets for intuitive palette selection & live theme sync
+const ROUTE_COLOR_PRESETS = [
+  { name: 'Crimson Red', hex: '#DC2626' },
+  { name: 'Royal Blue', hex: '#2563EB' },
+  { name: 'Emerald Green', hex: '#16A34A' },
+  { name: 'Amber Orange', hex: '#D97706' },
+  { name: 'Violet Purple', hex: '#7C3AED' },
+  { name: 'Sky Cyan', hex: '#0284C7' },
+  { name: 'Rose Pink', hex: '#E11D48' },
+  { name: 'Canary Yellow', hex: '#EAB308' },
+  { name: 'Teal Cyan', hex: '#0D9488' },
+  { name: 'Slate Gray', hex: '#475569' }
+];
+
+function setRouteColor(route, newColor) {
+  if (!route || !newColor) return;
+  route.color = newColor;
+  ensureSvgMarkers();
+  renderRoutesSvg();
+
+  // If playback step is currently on this route, update active traveler & step colors
+  if (animationEngine && animationEngine.steps) {
+    const curStep = animationEngine.steps[animationEngine.currentStep];
+    if (curStep && curStep.type === 'route' && curStep.activeRouteId === route.id) {
+      if (curStep.routeData) curStep.routeData.color = newColor;
+      const travelerCircles = document.querySelectorAll('.traveler-token circle');
+      if (travelerCircles && travelerCircles.length >= 2) {
+        travelerCircles[0].setAttribute('fill', newColor);
+        travelerCircles[1].setAttribute('stroke', newColor);
+      }
+    }
+  }
+
+  // Update route card in the Routes tab
+  const card = document.querySelector(`.route-card[data-route-card-id="${route.id}"]`);
+  if (card) {
+    const icon = card.querySelector('.route-header-color-icon');
+    if (icon) icon.style.color = newColor;
+    const dot = card.querySelector('.route-header-color-dot');
+    if (dot) dot.style.background = newColor;
+    const hexTag = card.querySelector('.route-color-hex-tag');
+    if (hexTag) hexTag.textContent = newColor.toUpperCase();
+    const picker = card.querySelector('.route-native-color-picker');
+    if (picker) picker.value = newColor;
+    card.querySelectorAll('.route-color-swatch-btn').forEach(b => {
+      const match = (b.getAttribute('data-color') || '').toLowerCase() === newColor.toLowerCase();
+      b.classList.toggle('is-active', match);
+      b.style.borderColor = match ? '#FFFFFF' : 'rgba(255,255,255,0.25)';
+      b.style.boxShadow = match ? '0 0 0 2px #0B1120, 0 0 0 4px #FFFFFF' : 'none';
+      b.style.transform = match ? 'scale(1.15)' : 'scale(1)';
+    });
+  }
+
+  // Update popover if open for this route
+  if (activeWaypointContext && activeWaypointContext.route && activeWaypointContext.route.id === route.id) {
+    renderPopoverRouteColors(route);
+  }
+
+  syncAppStateReferences();
+  renderTimelinePills();
+}
+
+function renderPopoverRouteColors(route) {
+  const container = document.getElementById('popoverRouteSwatches');
+  const hexLabel = document.getElementById('popoverRouteColorHex');
+  const colorPicker = document.getElementById('popoverRouteColorPicker');
+  if (!container || !route) return;
+
+  const curColor = (route.color || '#DC2626').toLowerCase();
+  if (hexLabel) hexLabel.textContent = (route.color || '#DC2626').toUpperCase();
+  if (colorPicker) colorPicker.value = route.color || '#DC2626';
+
+  container.innerHTML = ROUTE_COLOR_PRESETS.map(p => `
+    <button type="button" class="popover-color-swatch-btn ${p.hex.toLowerCase() === curColor ? 'is-active' : ''}"
+      data-color="${p.hex}" title="${p.name} (${p.hex})" style="background:${p.hex};"></button>
+  `).join('');
+
+  container.querySelectorAll('.popover-color-swatch-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const col = btn.getAttribute('data-color');
+      setRouteColor(route, col);
+      showToast(`Corridor color updated to ${col}`, '🎨');
+    });
+  });
+}
+
 // Waypoint popover state
 let activeWaypointContext = null;
 
@@ -836,6 +931,7 @@ function showWaypointPopover(route, waypointIdx, pt) {
 
   activeWaypointContext = { route, waypointIdx, pt };
   title.textContent = `${route.title || 'Corridor'} (Node #${waypointIdx + 1})`;
+  renderPopoverRouteColors(route);
 
   // Populate node note input and checkbox state
   if (noteInput) {
@@ -860,7 +956,7 @@ function showWaypointPopover(route, waypointIdx, pt) {
   let y = screenPt.y - contRect.top;
 
   const popoverW = 320;
-  const popoverH = 205;
+  const popoverH = 295;
 
   // Clamp horizontally so popover stays comfortably within container
   x = Math.max(popoverW / 2 + 12, Math.min(contRect.width - popoverW / 2 - 12, x));
@@ -908,6 +1004,17 @@ function renderRoutesSvg() {
 
     svgHtml += `
       <g class="route-group" data-route-id="${route.id}">
+        <!-- Invisible wide hit-target for effortless clicking on the corridor -->
+        <path d="${pathD}"
+          class="route-hit-target"
+          data-route-id="${route.id}"
+          fill="none"
+          stroke="transparent"
+          stroke-width="22"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          style="cursor: pointer;"
+        />
         <path d="${pathD}"
           class="route-path"
           data-route-id="${route.id}"
@@ -918,6 +1025,7 @@ function renderRoutesSvg() {
           stroke-linejoin="round"
           ${endAttr}
           ${startAttr}
+          style="cursor: pointer;"
         />
     `;
 
@@ -986,6 +1094,27 @@ function renderRoutesSvg() {
       const route = appState.routes.find(r => r.id === rId);
       if (route && route.points && route.points[wpIdx]) {
         showWaypointPopover(route, wpIdx, route.points[wpIdx]);
+      }
+    });
+  });
+
+  // Clicking anywhere along a route corridor selects and highlights it in sidebar
+  svgRoutesLayer.querySelectorAll('.route-hit-target, .route-path').forEach(pathEl => {
+    pathEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const rId = pathEl.getAttribute('data-route-id');
+      const route = appState.routes.find(r => r.id === rId);
+      if (route) {
+        const tabRoutes = document.querySelector('.tab-btn[data-tab="routes"]');
+        if (tabRoutes) tabRoutes.click();
+        setTimeout(() => {
+          const card = document.querySelector(`.route-card[data-route-card-id="${route.id}"]`);
+          if (card) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            card.classList.add('item-card-highlight');
+            setTimeout(() => card.classList.remove('item-card-highlight'), 1200);
+          }
+        }, 50);
       }
     });
   });
@@ -1232,12 +1361,23 @@ function updateSidebarLists() {
     const isStart = route.arrowStyle === 'start';
     const isNone = route.arrowStyle === 'none' || route.arrowEnd === false;
 
+    const curRouteColor = route.color || '#DC2626';
+    const colorSwatchesHtml = ROUTE_COLOR_PRESETS.map(p => {
+      const isSelected = curRouteColor.toLowerCase() === p.hex.toLowerCase();
+      return `
+        <button type="button" class="route-color-swatch-btn ${isSelected ? 'is-active' : ''}"
+          data-color="${p.hex}" title="${p.name} (${p.hex})"
+          style="background:${p.hex}; border: 1.8px solid ${isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.25)'};"></button>
+      `;
+    }).join('');
+
     card.innerHTML = `
       <div class="item-card-header" style="align-items: center;">
-        <div class="item-badge-title" style="display:flex; align-items:center; gap:6px; flex:1; min-width:0;">
+        <div class="item-badge-title" style="display:flex; align-items:center; gap:7px; flex:1; min-width:0;">
           <span class="route-drag-handle" title="Drag to reorder sequence" draggable="false">⠿</span>
           <span class="seq-order-badge" title="Sequence Position #${rIdx + 1}">#${rIdx + 1}</span>
-          <span style="color:${route.color || '#DC2626'}; font-size:0.8rem;">━━▶</span>
+          <span class="route-header-color-dot" style="display:inline-block; width:11px; height:11px; border-radius:50%; background:${curRouteColor}; border:1.5px solid #FFFFFF; flex-shrink:0;"></span>
+          <span class="route-header-color-icon" style="color:${curRouteColor}; font-size:0.82rem;">━━▶</span>
           <span class="item-card-title">${route.title || `Route Corridor ${rIdx + 1}`}</span>
         </div>
         <div class="item-card-actions">
@@ -1251,7 +1391,22 @@ function updateSidebarLists() {
       <div class="form-group" style="margin-top:6px;">
         <input type="text" class="form-input edit-route-title" value="${route.title || `Route Corridor ${rIdx + 1}`}">
       </div>
-      <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
+
+      <!-- Dedicated Route Color Control inside the Routes Tab -->
+      <div class="route-color-control-box">
+        <div class="route-color-control-header">
+          <span class="route-color-control-title">🎨 Route Color</span>
+          <div class="route-color-picker-group">
+            <input type="color" class="route-native-color-picker" value="${curRouteColor}" title="Click to choose custom route color">
+            <span class="route-color-hex-tag">${curRouteColor.toUpperCase()}</span>
+          </div>
+        </div>
+        <div class="route-color-presets-row">
+          ${colorSwatchesHtml}
+        </div>
+      </div>
+
+      <div style="display:flex; gap:6px; margin-top:8px; align-items:center;">
         <span style="font-size:0.72rem; color:#94A3B8;">Arrow:</span>
         <select class="form-select select-route-arrow form-select-xs" style="flex:1;">
           <option value="end" ${isEnd ? 'selected' : ''}>→ End Arrow</option>
@@ -1382,6 +1537,24 @@ function updateSidebarLists() {
       card.querySelector('.item-card-title').textContent = route.title;
       animationEngine.compileSteps();
       renderTimelinePills();
+    });
+
+    card.querySelectorAll('.route-color-swatch-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const col = btn.getAttribute('data-color');
+        setRouteColor(route, col);
+      });
+    });
+
+    const nativeColorPicker = card.querySelector('.route-native-color-picker');
+    nativeColorPicker?.addEventListener('input', (e) => {
+      e.stopPropagation();
+      setRouteColor(route, e.target.value);
+    });
+    nativeColorPicker?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setRouteColor(route, e.target.value);
     });
 
     card.querySelector('.select-route-arrow').addEventListener('change', (e) => {

@@ -692,14 +692,49 @@ export class ExportService {
 
               if (shouldShow) {
                 const screenP = toScreen(p);
-                const noteBoxW = 310;
-                const noteBoxH = 72;
+                const rawNote = String(p.note || '').trim();
+                if (!rawNote) return;
+
+                // Configure typography for user's pure text note (no node # or corridor title)
+                ctx.font = '500 13px "Plus Jakarta Sans", Segoe UI, sans-serif';
+                const words = rawNote.split(/\s+/);
+                const maxTextWidth = 270;
+                const lines = [];
+                let currentLine = '';
+                for (let w = 0; w < words.length; w++) {
+                  const testLine = currentLine ? currentLine + ' ' + words[w] : words[w];
+                  if (ctx.measureText(testLine).width > maxTextWidth && currentLine) {
+                    lines.push(currentLine);
+                    currentLine = words[w];
+                    if (lines.length >= 3) break;
+                  } else {
+                    currentLine = testLine;
+                  }
+                }
+                if (currentLine && lines.length < 3) {
+                  lines.push(currentLine);
+                } else if (lines.length >= 3 && currentLine) {
+                  lines[2] = lines[2].replace(/(\s+[^\s]+)$/, '...');
+                }
+
+                const lineSpacing = 18;
+                const padX = 14;
+                const padY = 10;
+                let maxMeasuredW = 0;
+                lines.forEach(l => {
+                  const w = ctx.measureText(l).width;
+                  if (w > maxMeasuredW) maxMeasuredW = w;
+                });
+
+                const noteBoxW = Math.min(320, Math.max(140, Math.round(maxMeasuredW + padX * 2)));
+                const noteBoxH = Math.max(38, Math.round(lines.length * lineSpacing + padY * 2));
+
                 let noteX = Math.round(screenP.x - noteBoxW / 2);
-                noteX = Math.max(20, Math.min(width - noteBoxW - 20, noteX));
-                let noteY = Math.round(screenP.y - 20 - noteBoxH);
+                noteX = Math.max(16, Math.min(width - noteBoxW - 16, noteX));
+                let noteY = Math.round(screenP.y - 18 - noteBoxH);
                 let placeAbove = true;
                 if (noteY < 24) {
-                  noteY = Math.round(screenP.y + 24);
+                  noteY = Math.round(screenP.y + 22);
                   placeAbove = false;
                 }
 
@@ -708,46 +743,38 @@ export class ExportService {
                 ctx.save();
                 ctx.globalAlpha = noteAlpha;
                 ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-                ctx.shadowBlur = 18;
-                ctx.shadowOffsetY = 6;
+                ctx.shadowBlur = 16;
+                ctx.shadowOffsetY = 5;
 
                 // Box background
                 ctx.fillStyle = '#0F172A';
-                ctx.fillRect(noteX, noteY, noteBoxW, noteBoxH);
+                if (ctx.roundRect) {
+                  ctx.beginPath();
+                  ctx.roundRect(noteX, noteY, noteBoxW, noteBoxH, 6);
+                  ctx.fill();
+                } else {
+                  ctx.fillRect(noteX, noteY, noteBoxW, noteBoxH);
+                }
 
                 ctx.shadowColor = 'transparent';
                 ctx.strokeStyle = '#F59E0B';
                 ctx.lineWidth = 1.8;
-                ctx.strokeRect(noteX, noteY, noteBoxW, noteBoxH);
+                if (ctx.roundRect) {
+                  ctx.beginPath();
+                  ctx.roundRect(noteX, noteY, noteBoxW, noteBoxH, 6);
+                  ctx.stroke();
+                } else {
+                  ctx.strokeRect(noteX, noteY, noteBoxW, noteBoxH);
+                }
 
-                // Header pill
-                ctx.fillStyle = '#F59E0B';
-                ctx.font = 'bold 11px "Plus Jakarta Sans", Segoe UI, sans-serif';
+                // Render note text - only what the user gave, no node or route numbers
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '500 13px "Plus Jakarta Sans", Segoe UI, sans-serif';
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'top';
-                ctx.fillText(`📌 NODE #${pIdx + 1} NOTE • ${route.title || 'Corridor'}`, noteX + 10, noteY + 8);
-
-                // Note text
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = '12px "Plus Jakarta Sans", Segoe UI, sans-serif';
-                const words = String(p.note || '').split(' ');
-                let l1 = '', l2 = '';
-                for (const w of words) {
-                  const test1 = l1 ? l1 + ' ' + w : w;
-                  if (ctx.measureText(test1).width < noteBoxW - 20 && !l2) {
-                    l1 = test1;
-                  } else {
-                    l2 = l2 ? l2 + ' ' + w : w;
-                  }
-                }
-                ctx.fillText(l1, noteX + 10, noteY + 28);
-                if (l2) {
-                  let l2Text = l2;
-                  while (ctx.measureText(l2Text + '...').width > noteBoxW - 20 && l2Text.length > 5) {
-                    l2Text = l2Text.substring(0, l2Text.length - 3);
-                  }
-                  ctx.fillText(l2Text + (l2Text.length < l2.length ? '...' : ''), noteX + 10, noteY + 48);
-                }
+                lines.forEach((l, lIdx) => {
+                  ctx.fillText(l, noteX + padX, noteY + padY + lIdx * lineSpacing);
+                });
 
                 // Pointer arrow
                 const arrowX = Math.max(noteX + 16, Math.min(noteX + noteBoxW - 16, screenP.x));

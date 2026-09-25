@@ -143,7 +143,7 @@ export const sampleCampusPlan = {
       arrowStyle: 'end',
       arrowSize: 'standard',
       points: [
-        { x: 522, y: 1029, note: 'Departure Node: 10,000+ students from BMTC & PG arrive here', showOnStart: true },
+        { x: 522, y: 1029, note: '10,000+ students from BMTC & PG arrive here daily', showOnStart: true },
         { x: 524, y: 960 },
         { x: 546, y: 915 },
         { x: 554, y: 865 },

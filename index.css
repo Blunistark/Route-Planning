@@ -1043,6 +1043,222 @@ body.presentation-active .waypoint-node-group {
   border-color: #DC2626;
 }
 
+/* Popover Corridor Color Box */
+.popover-color-box {
+  background: #1E293B;
+  border: 1px solid #334155;
+  border-radius: var(--radius-xs);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.popover-color-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.popover-color-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #38BDF8;
+}
+
+.popover-color-hex {
+  font-size: 0.68rem;
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+  color: #CBD5E1;
+  background: #0F172A;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid #334155;
+}
+
+.popover-color-swatches-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.popover-color-swatches {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.popover-color-swatch-btn,
+.route-color-swatch-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.8px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+.popover-color-swatch-btn:hover,
+.route-color-swatch-btn:hover {
+  transform: scale(1.22);
+  border-color: #FFFFFF !important;
+}
+
+.popover-color-swatch-btn.is-active,
+.route-color-swatch-btn.is-active {
+  transform: scale(1.15);
+  border-color: #FFFFFF !important;
+  box-shadow: 0 0 0 2px #0B1120, 0 0 0 4px #FFFFFF !important;
+}
+
+/* Dedicated Route Color Control Box inside the Routes Tab */
+.route-color-control-box {
+  background: #0B1120;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+
+.route-color-control-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 7px;
+}
+
+.route-color-control-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #38BDF8;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.route-color-picker-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.route-native-color-picker {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 24px;
+  border: 1.5px solid #475569;
+  border-radius: 4px;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.route-native-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.route-native-color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+.route-native-color-picker:hover {
+  border-color: #38BDF8;
+  transform: scale(1.08);
+}
+
+.route-color-hex-tag {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #F1F5F9;
+  background: #1E293B;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid #475569;
+  letter-spacing: 0.04em;
+}
+
+.route-color-presets-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.popover-color-picker-label,
+.route-custom-color-label {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #0F172A;
+  border: 1.5px dashed #64748B;
+  transition: all 0.15s ease;
+  margin-left: 2px;
+}
+
+.popover-color-picker-label:hover,
+.route-custom-color-label:hover {
+  border-color: #38BDF8;
+  transform: scale(1.15);
+}
+
+.popover-color-picker,
+.route-custom-color-input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  left: 0;
+  top: 0;
+  border: none;
+  padding: 0;
+}
+
+.popover-color-picker-icon {
+  font-size: 0.72rem;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.route-custom-color-disc {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: block;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.item-card-highlight {
+  animation: pulseCardHighlight 1.2s ease;
+  border-color: #38BDF8 !important;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.45) !important;
+}
+
+@keyframes pulseCardHighlight {
+  0% { transform: scale(1); border-color: #38BDF8; }
+  50% { transform: scale(1.02); border-color: #38BDF8; box-shadow: 0 0 20px rgba(56, 189, 248, 0.6); }
+  100% { transform: scale(1); }
+}
+
 .popover-divider {
   display: flex;
   align-items: center;
