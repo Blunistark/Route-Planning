@@ -27,6 +27,9 @@ export class AnimationEngine {
     this.nodeNoteBody = document.getElementById('nodeNoteBody');
     this.nodeNoteTimeout = null;
 
+    // Summary Notes Layer (for displaying all notes when animation finishes / zooms out to whole map)
+    this.summaryNotesLayer = document.getElementById('stageSummaryNotesLayer');
+
     const btnCloseCallout = document.getElementById('btnCloseCallout');
     if (btnCloseCallout) {
       btnCloseCallout.addEventListener('click', (e) => {
@@ -314,18 +317,28 @@ export class AnimationEngine {
     }
 
     // Callout dialog management
+    // Callout dialog & Node note management
     if (step.type === 'stop' && step.activeStopData && this.state.showDialogOnFocus !== false) {
+      this.clearSummaryNotes();
       this.showCalloutDialog(step.activeStopData);
       this.hideNodeNoteCallout();
     } else if (step.type === 'route' && step.routeData && step.routeData.points) {
+      this.clearSummaryNotes();
       this.hideCalloutDialog();
       const p0 = step.routeData.points[0];
       if (p0 && p0.note && p0.showOnStart !== false) {
-        this.showNodeNoteCallout(p0, 5500);
+        // Keep note visible during route trace so viewer has ample time to read
+        this.showNodeNoteCallout(p0, 0);
       } else {
         this.hideNodeNoteCallout();
       }
+    } else if (step.type === 'summary') {
+      this.hideCalloutDialog();
+      this.hideNodeNoteCallout();
+      // Render all waypoint notes across all routes so they stay visible when zoomed out to the whole map!
+      this.renderSummaryNotes();
     } else {
+      this.clearSummaryNotes();
       this.hideCalloutDialog();
       this.hideNodeNoteCallout();
     }
@@ -335,6 +348,39 @@ export class AnimationEngine {
 
     if (this.onStepChange) {
       this.onStepChange(this.currentStep, step, this.steps.length);
+    }
+  }
+
+  renderSummaryNotes() {
+    if (!this.summaryNotesLayer) return;
+    this.summaryNotesLayer.innerHTML = '';
+
+    const { routes = [] } = this.state;
+    const noteItems = [];
+
+    routes.forEach(route => {
+      (route.points || []).forEach(pt => {
+        if (pt && pt.note && String(pt.note).trim()) {
+          noteItems.push({ pt, note: String(pt.note).trim(), color: route.color || '#DC2626' });
+        }
+      });
+    });
+
+    if (noteItems.length === 0) return;
+
+    noteItems.forEach((item) => {
+      const badge = document.createElement('div');
+      badge.className = 'summary-node-note-badge';
+      badge.style.left = `${item.pt.x}px`;
+      badge.style.top = `${item.pt.y}px`;
+      badge.textContent = item.note;
+      this.summaryNotesLayer.appendChild(badge);
+    });
+  }
+
+  clearSummaryNotes() {
+    if (this.summaryNotesLayer) {
+      this.summaryNotesLayer.innerHTML = '';
     }
   }
 
@@ -356,7 +402,7 @@ export class AnimationEngine {
     }
   }
 
-  showNodeNoteCallout(pt, autoDismissMs = 5000) {
+  showNodeNoteCallout(pt, autoDismissMs = 0) {
     if (!this.nodeNoteCallout) return;
     if (this.nodeNoteBody) {
       this.nodeNoteBody.textContent = pt.note || '';

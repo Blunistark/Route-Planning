@@ -344,7 +344,7 @@ export class ExportService {
     // RequestAnimationFrame-synchronized phase animator based on high-resolution performance.now()
     const animatePhase = (durationMs, onFrame) => {
       if (durationMs <= 0) {
-        onFrame(1.0);
+        try { onFrame(1.0); } catch (_) {}
         return Promise.resolve();
       }
       return new Promise((resolve) => {
@@ -353,7 +353,11 @@ export class ExportService {
           if (startTime === null) startTime = now;
           const elapsed = now - startTime;
           const t = Math.min(1.0, elapsed / durationMs);
-          onFrame(t);
+          try {
+            onFrame(t);
+          } catch (err) {
+            console.warn('Frame render exception:', err);
+          }
           if (t < 1.0) {
             requestAnimationFrame(tick);
           } else {
@@ -379,8 +383,8 @@ export class ExportService {
         const routeSec = parseFloat(step.routeData?.duration) || 3.0;
         const totalRouteDuration = Math.max(300, Math.round(((routeSec * 1000) / animSpeed) * paceFactor));
 
-        // Phase 1: Smooth camera pan/zoom into corridor framing (first 25%, max 450ms)
-        const panDuration = i > 0 ? Math.min(450, Math.round(totalRouteDuration * 0.25)) : 0;
+        // Smooth camera pan into corridor framing if camera position needs adjustment (max 300ms)
+        const panDuration = i > 0 ? Math.min(300, Math.round(totalRouteDuration * 0.2)) : 0;
         if (panDuration > 0) {
           await animatePhase(panDuration, (t) => {
             const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
@@ -389,21 +393,17 @@ export class ExportService {
               centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
               centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
             };
-            // Trace initial portion of route smoothly while camera glides
-            const initialProgress = t * 0.12;
-            this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, initialProgress, interpolatedCamera);
+            this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
           });
         }
 
-        // Phase 2: Full deliberate corridor drawing (from 12% to 100%)
-        const remainingDuration = Math.max(150, totalRouteDuration - panDuration);
-        await animatePhase(remainingDuration, (t) => {
-          const overallProgress = 0.12 + t * 0.88;
-          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, overallProgress, targetCamera);
+        // Full route corridor drawing from 0.0 to 1.0 across exact user configured duration
+        await animatePhase(totalRouteDuration, (t) => {
+          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, t, targetCamera);
         });
 
-        // Phase 3: Hold step snapshot proportional to route duration
-        const holdDuration = Math.max(350, Math.min(1200, Math.round(totalRouteDuration * 0.35))) * paceFactor;
+        // Crisp hold snapshot so the completed corridor is appreciated before next transition
+        const holdDuration = Math.max(250, Math.min(700, Math.round(totalRouteDuration * 0.25))) * paceFactor;
         await animatePhase(holdDuration, () => {
           this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
         });
@@ -411,7 +411,7 @@ export class ExportService {
         // Non-route step (Stops, Overview, Summary)
         const stepTimeScale = paceFactor / animSpeed;
         if (i > 0) {
-          const panDuration = Math.round(850 * stepTimeScale);
+          const panDuration = step.type === 'summary' ? Math.round(650 * stepTimeScale) : Math.round(450 * stepTimeScale);
           await animatePhase(panDuration, (t) => {
             const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
             const interpolatedCamera = {
@@ -423,14 +423,14 @@ export class ExportService {
           });
         }
 
-        const drawDuration = Math.round(500 * stepTimeScale);
+        const drawDuration = Math.round(300 * stepTimeScale);
         await animatePhase(drawDuration, (progress) => {
           this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
         });
 
         const baseHold = step.type === 'stop'
-          ? 1800
-          : (step.type === 'overview' || step.type === 'summary' ? 2200 : 1200);
+          ? 650 // Snappy milestone highlight instead of 1.8s freeze!
+          : (step.type === 'summary' ? 2400 : 1000);
         const holdDuration = Math.round(baseHold * stepTimeScale);
 
         await animatePhase(holdDuration, () => {
@@ -530,22 +530,37 @@ export class ExportService {
 
       // 2. Draw Routes (Continuous sub-pixel polyline interpolation & progressive visibility)
       const isSummary = step.type === 'summary';
+      const currentStepIdx = (typeof stepIndex === 'number') ? stepIndex : (step?.index ?? 0);
 
       this.state.routes.forEach((route) => {
         const points = route.points;
         if (!points || points.length < 2) return;
 
-        // Determine step index where this route is introduced
-        const routeStepIdx = this.animEngine.steps.findIndex(s => s.type === 'route' && s.activeRouteId === route.id);
+        // Determine if this route is currently active
+        const isCurrentRoute = (step.type === 'route' && (
+          String(step.activeRouteId) === String(route.id) ||
+          String(step.routeData?.id) === String(route.id) ||
+          (step.routeData && step.routeData === route)
+        ));
+
+        // Find step index where this route is introduced
+        let routeStepIdx = -1;
+        if (this.animEngine?.steps) {
+          routeStepIdx = this.animEngine.steps.findIndex(s =>
+            s.type === 'route' && (
+              String(s.activeRouteId) === String(route.id) ||
+              String(s.routeData?.id) === String(route.id) ||
+              s.routeData === route
+            )
+          );
+        }
 
         // In progressive tour presentation, keep future routes strictly hidden before their turn
         if (!isSummary) {
-          if (routeStepIdx === -1 || step.index < routeStepIdx) {
+          if (routeStepIdx !== -1 && currentStepIdx < routeStepIdx && !isCurrentRoute) {
             return;
           }
         }
-
-        const isCurrentRoute = step.type === 'route' && step.activeRouteId === route.id;
 
         // Precompute cumulative lengths of segments for continuous sub-pixel interpolation
         let totalLength = 0;
@@ -643,7 +658,7 @@ export class ExportService {
         }
 
         // Destination Terminal Arrowhead (displayed once route is fully drawn or completed, matching SVG marker-end)
-        const showEndArrow = route.arrowEnd !== false && (!isCurrentRoute || progress >= 0.95);
+        const showEndArrow = route.arrowEnd !== false && (!isCurrentRoute || progress >= 0.92);
         if (showEndArrow && points.length >= 2) {
           const lastA = points[points.length - 2];
           const lastB = points[points.length - 1];
@@ -670,14 +685,14 @@ export class ExportService {
           ctx.restore();
         }
 
-        // Waypoint Note Flags on Nodes
-        points.forEach((p, pIdx) => {
+        // Waypoint Note Marker Rings on Nodes
+        points.forEach((p) => {
           if (p && p.note) {
             const screenP = toScreen(p);
             ctx.save();
             ctx.fillStyle = '#F59E0B';
             ctx.beginPath();
-            ctx.arc(screenP.x, screenP.y - 12, 6 * effScale, 0, Math.PI * 2);
+            ctx.arc(screenP.x, screenP.y - 10, Math.max(4.5, 5.5 * effScale), 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = '#0F172A';
             ctx.lineWidth = 1.2;
@@ -685,134 +700,161 @@ export class ExportService {
             ctx.restore();
           }
         });
-
-        // 2b. Draw Node Note Callout when animation starts or traces this route
-        if (isCurrentRoute && points && points.length > 0) {
-          points.forEach((p, pIdx) => {
-            if (p && p.note) {
-              const shouldShow = (pIdx === 0)
-                ? (progress >= 0.04 && progress <= 0.88)
-                : (p.showOnStart ? (progress >= 0.04 && progress <= 0.88) : false);
-
-              if (shouldShow) {
-                const screenP = toScreen(p);
-                const rawNote = String(p.note || '').trim();
-                if (!rawNote) return;
-
-                // Configure typography for user's pure text note (no node # or corridor title)
-                ctx.font = '500 13px "Plus Jakarta Sans", Segoe UI, sans-serif';
-                const words = rawNote.split(/\s+/);
-                const maxTextWidth = 270;
-                const lines = [];
-                let currentLine = '';
-                for (let w = 0; w < words.length; w++) {
-                  const testLine = currentLine ? currentLine + ' ' + words[w] : words[w];
-                  if (ctx.measureText(testLine).width > maxTextWidth && currentLine) {
-                    lines.push(currentLine);
-                    currentLine = words[w];
-                    if (lines.length >= 3) break;
-                  } else {
-                    currentLine = testLine;
-                  }
-                }
-                if (currentLine && lines.length < 3) {
-                  lines.push(currentLine);
-                } else if (lines.length >= 3 && currentLine) {
-                  lines[2] = lines[2].replace(/(\s+[^\s]+)$/, '...');
-                }
-
-                const lineSpacing = 18;
-                const padX = 14;
-                const padY = 10;
-                let maxMeasuredW = 0;
-                lines.forEach(l => {
-                  const w = ctx.measureText(l).width;
-                  if (w > maxMeasuredW) maxMeasuredW = w;
-                });
-
-                const noteBoxW = Math.min(320, Math.max(140, Math.round(maxMeasuredW + padX * 2)));
-                const noteBoxH = Math.max(38, Math.round(lines.length * lineSpacing + padY * 2));
-
-                let noteX = Math.round(screenP.x - noteBoxW / 2);
-                noteX = Math.max(16, Math.min(width - noteBoxW - 16, noteX));
-                let noteY = Math.round(screenP.y - 18 - noteBoxH);
-                let placeAbove = true;
-                if (noteY < 24) {
-                  noteY = Math.round(screenP.y + 22);
-                  placeAbove = false;
-                }
-
-                const noteAlpha = Math.min(1.0, Math.max(0.0, (progress - 0.04) / 0.12));
-
-                ctx.save();
-                ctx.globalAlpha = noteAlpha;
-                ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-                ctx.shadowBlur = 16;
-                ctx.shadowOffsetY = 5;
-
-                // Box background
-                ctx.fillStyle = '#0F172A';
-                if (ctx.roundRect) {
-                  ctx.beginPath();
-                  ctx.roundRect(noteX, noteY, noteBoxW, noteBoxH, 6);
-                  ctx.fill();
-                } else {
-                  ctx.fillRect(noteX, noteY, noteBoxW, noteBoxH);
-                }
-
-                ctx.shadowColor = 'transparent';
-                ctx.strokeStyle = '#F59E0B';
-                ctx.lineWidth = 1.8;
-                if (ctx.roundRect) {
-                  ctx.beginPath();
-                  ctx.roundRect(noteX, noteY, noteBoxW, noteBoxH, 6);
-                  ctx.stroke();
-                } else {
-                  ctx.strokeRect(noteX, noteY, noteBoxW, noteBoxH);
-                }
-
-                // Render note text - only what the user gave, no node or route numbers
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = '500 13px "Plus Jakarta Sans", Segoe UI, sans-serif';
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'top';
-                lines.forEach((l, lIdx) => {
-                  ctx.fillText(l, noteX + padX, noteY + padY + lIdx * lineSpacing);
-                });
-
-                // Pointer arrow
-                const arrowX = Math.max(noteX + 16, Math.min(noteX + noteBoxW - 16, screenP.x));
-                ctx.beginPath();
-                if (placeAbove) {
-                  ctx.moveTo(arrowX - 8, noteY + noteBoxH);
-                  ctx.lineTo(arrowX + 8, noteY + noteBoxH);
-                  ctx.lineTo(arrowX, noteY + noteBoxH + 10);
-                } else {
-                  ctx.moveTo(arrowX - 8, noteY);
-                  ctx.lineTo(arrowX + 8, noteY);
-                  ctx.lineTo(arrowX, noteY - 10);
-                }
-                ctx.closePath();
-                ctx.fillStyle = '#0F172A';
-                ctx.fill();
-                ctx.strokeStyle = '#F59E0B';
-                ctx.lineWidth = 1.8;
-                ctx.stroke();
-
-                ctx.restore();
-              }
-            }
-          });
-        }
       });
 
-      // 3. Draw Permanent Labels
-      if (this.state.permanentLabels && this.state.showPermanentLabels !== false) {
-        this.state.permanentLabels.forEach(lbl => {
+      // 2b. Draw Waypoint Note Callouts
+      // PERSISTENT: Visible during active route drawing & hold, AND ALL NOTES VISIBLE when zoomed out to the whole map / summary!
+      const activeNotes = [];
+      this.state.routes.forEach((route) => {
+        const points = route.points;
+        if (!points || points.length === 0) return;
+
+        const isCurrentRoute = (step.type === 'route' && (
+          String(step.activeRouteId) === String(route.id) ||
+          String(step.routeData?.id) === String(route.id) ||
+          (step.routeData && step.routeData === route)
+        ));
+
+        // When zoomed out to whole map / summary, show all notes from all completed routes
+        // When on a route step, show the active route's note from start to finish
+        points.forEach((p, pIdx) => {
+          if (p && p.note) {
+            const rawNote = String(p.note || '').trim();
+            if (!rawNote) return;
+
+            if (isSummary) {
+              activeNotes.push({ p, route, rawNote, alpha: 1.0 });
+            } else if (isCurrentRoute) {
+              const shouldShow = (pIdx === 0)
+                ? (progress >= 0.02)
+                : (p.showOnStart ? (progress >= 0.02) : (progress >= 0.25));
+              if (shouldShow) {
+                const noteAlpha = Math.min(1.0, Math.max(0.1, (progress - 0.02) / 0.12));
+                activeNotes.push({ p, route, rawNote, alpha: noteAlpha });
+              }
+            }
+          }
+        });
+      });
+
+      // Render Waypoint Note Callouts with Boundary Clamping & Arrow Anchor
+      if (activeNotes.length > 0) {
+        activeNotes.forEach((noteItem) => {
+          const { p, rawNote, alpha } = noteItem;
+          const screenP = toScreen(p);
+
+          ctx.font = '500 12.5px "Plus Jakarta Sans", Segoe UI, sans-serif';
+          const words = rawNote.split(/\s+/);
+          const maxTextWidth = 260;
+          const lines = [];
+          let currentLine = '';
+          for (let w = 0; w < words.length; w++) {
+            const testLine = currentLine ? currentLine + ' ' + words[w] : words[w];
+            if (ctx.measureText(testLine).width > maxTextWidth && currentLine) {
+              lines.push(currentLine);
+              currentLine = words[w];
+              if (lines.length >= 3) break;
+            } else {
+              currentLine = testLine;
+            }
+          }
+          if (currentLine && lines.length < 3) {
+            lines.push(currentLine);
+          } else if (lines.length >= 3 && currentLine) {
+            lines[2] = lines[2].replace(/(\s+[^\s]+)$/, '...');
+          }
+
+          const lineSpacing = 17;
+          const padX = 12;
+          const padY = 9;
+          let maxMeasuredW = 0;
+          lines.forEach(l => {
+            const w = ctx.measureText(l).width;
+            if (w > maxMeasuredW) maxMeasuredW = w;
+          });
+
+          const noteBoxW = Math.min(300, Math.max(130, Math.round(maxMeasuredW + padX * 2)));
+          const noteBoxH = Math.max(34, Math.round(lines.length * lineSpacing + padY * 2));
+
+          let noteX = Math.round(screenP.x - noteBoxW / 2);
+          noteX = Math.max(14, Math.min(width - noteBoxW - 14, noteX));
+          let noteY = Math.round(screenP.y - 14 - noteBoxH);
+          let placeAbove = true;
+          if (noteY < 20) {
+            noteY = Math.round(screenP.y + 18);
+            placeAbove = false;
+          }
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
+          ctx.shadowBlur = 14;
+          ctx.shadowOffsetY = 4;
+
+          // Box background
+          ctx.fillStyle = '#0F172A';
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(noteX, noteY, noteBoxW, noteBoxH, 6);
+            ctx.fill();
+          } else {
+            ctx.fillRect(noteX, noteY, noteBoxW, noteBoxH);
+          }
+
+          ctx.shadowColor = 'transparent';
+          ctx.strokeStyle = '#F59E0B';
+          ctx.lineWidth = 1.6;
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(noteX, noteY, noteBoxW, noteBoxH, 6);
+            ctx.stroke();
+          } else {
+            ctx.strokeRect(noteX, noteY, noteBoxW, noteBoxH);
+          }
+
+          // Note text
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '500 12.5px "Plus Jakarta Sans", Segoe UI, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          lines.forEach((l, lIdx) => {
+            ctx.fillText(l, noteX + padX, noteY + padY + lIdx * lineSpacing);
+          });
+
+          // Pointer arrow
+          const arrowX = Math.max(noteX + 14, Math.min(noteX + noteBoxW - 14, screenP.x));
+          ctx.beginPath();
+          if (placeAbove) {
+            ctx.moveTo(arrowX - 7, noteY + noteBoxH);
+            ctx.lineTo(arrowX + 7, noteY + noteBoxH);
+            ctx.lineTo(arrowX, noteY + noteBoxH + 8);
+          } else {
+            ctx.moveTo(arrowX - 7, noteY);
+            ctx.lineTo(arrowX + 7, noteY);
+            ctx.lineTo(arrowX, noteY - 8);
+          }
+          ctx.closePath();
+          ctx.fillStyle = '#0F172A';
+          ctx.fill();
+          ctx.strokeStyle = '#F59E0B';
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+
+          ctx.restore();
+        });
+      }
+
+      // 3. Draw Permanent Labels with Intelligent Collision Avoidance & Zoom-Adaptive Typography
+      // Prevents labels from clustering or stacking on top of each other when zoomed out to the whole map!
+      if (this.state.permanentLabels && this.state.showPermanentLabels !== false && this.state.permanentLabels.length > 0) {
+        // Measure and prepare bounding boxes in screen coordinates
+        const labelBoxes = this.state.permanentLabels.map(lbl => {
           const pt = toScreen({ x: lbl.x, y: lbl.y });
           const fontName = lbl.fontFamily || 'Plus Jakarta Sans';
-          const fontSize = Math.max(10, Math.round((lbl.fontSize || 11) * effScale * 1.15));
-          ctx.font = `bold ${fontSize}px ${fontName}, sans-serif`;
+          const baseSize = lbl.fontSize || 11;
+          // Zoom-adaptive font sizing: gentle dampening so text boxes don't balloon when zoomed out
+          const fontSize = Math.max(8, Math.min(13, Math.round(baseSize * Math.pow(Math.max(0.35, camZoom), 0.5))));
+          ctx.font = `bold ${fontSize}px "${fontName}", sans-serif`;
 
           const lines = String(lbl.text || '').split('\n');
           let maxLineW = 0;
@@ -821,9 +863,93 @@ export class ExportService {
             if (w > maxLineW) maxLineW = w;
           });
 
-          const lineH = fontSize * 1.35;
-          const boxH = lines.length * lineH + 8;
-          const boxW = maxLineW + 14;
+          const lineH = Math.round(fontSize * 1.3);
+          const boxH = Math.round(lines.length * lineH + 6);
+          const boxW = Math.round(maxLineW + 10);
+
+          return {
+            lbl,
+            origPt: pt,
+            fontName,
+            fontSize,
+            lineH,
+            lines,
+            w: boxW,
+            h: boxH,
+            x: Math.round(pt.x - boxW / 2),
+            y: Math.round(pt.y - boxH / 2)
+          };
+        });
+
+        // Iterative Collision Avoidance (Separating Axis Nudge)
+        for (let iter = 0; iter < 5; iter++) {
+          let hasOverlap = false;
+          for (let a = 0; a < labelBoxes.length; a++) {
+            for (let b = a + 1; b < labelBoxes.length; b++) {
+              const bA = labelBoxes[a];
+              const bB = labelBoxes[b];
+              const pad = 5;
+
+              const cAx = bA.x + bA.w / 2;
+              const cAy = bA.y + bA.h / 2;
+              const cBx = bB.x + bB.w / 2;
+              const cBy = bB.y + bB.h / 2;
+
+              const overlapX = (bA.w + bB.w) / 2 + pad - Math.abs(cAx - cBx);
+              const overlapY = (bA.h + bB.h) / 2 + pad - Math.abs(cAy - cBy);
+
+              if (overlapX > 0 && overlapY > 0) {
+                hasOverlap = true;
+                // Prefer vertical nudge for map labels
+                if (overlapY <= overlapX * 1.25) {
+                  const shift = Math.ceil(overlapY / 2) + 1;
+                  if (cAy < cBy) {
+                    bA.y -= shift;
+                    bB.y += shift;
+                  } else {
+                    bA.y += shift;
+                    bB.y -= shift;
+                  }
+                } else {
+                  const shift = Math.ceil(overlapX / 2) + 1;
+                  if (cAx < cBx) {
+                    bA.x -= shift;
+                    bB.x += shift;
+                  } else {
+                    bA.x += shift;
+                    bB.x += shift;
+                  }
+                }
+              }
+            }
+          }
+          if (!hasOverlap) break;
+        }
+
+        // Clamp to canvas borders
+        labelBoxes.forEach(box => {
+          box.x = Math.max(6, Math.min(width - box.w - 6, box.x));
+          box.y = Math.max(6, Math.min(height - box.h - 6, box.y));
+        });
+
+        // Render each de-cluttered label
+        labelBoxes.forEach(box => {
+          const { lbl, origPt, fontName, fontSize, lineH, lines, w: boxW, h: boxH, x: boxX, y: boxY } = box;
+          ctx.font = `bold ${fontSize}px "${fontName}", sans-serif`;
+
+          // If label was nudged significantly away from anchor point, draw a subtle leader line
+          const distShift = Math.hypot((boxX + boxW / 2) - origPt.x, (boxY + boxH / 2) - origPt.y);
+          if (distShift > 10) {
+            ctx.save();
+            ctx.strokeStyle = lbl.style === 'road-style' ? '#B45309' : (lbl.style === 'blueprint-style' ? '#0284C7' : '#64748B');
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(origPt.x, origPt.y);
+            ctx.lineTo(boxX + boxW / 2, boxY + (origPt.y > boxY + boxH / 2 ? boxH : 0));
+            ctx.stroke();
+            ctx.restore();
+          }
 
           ctx.save();
           if (lbl.style === 'road-style') {
@@ -840,9 +966,17 @@ export class ExportService {
             ctx.strokeStyle = '#334155';
           }
 
-          ctx.fillRect(pt.x - boxW / 2, pt.y - boxH / 2, boxW, boxH);
-          ctx.lineWidth = 1;
-          ctx.strokeRect(pt.x - boxW / 2, pt.y - boxH / 2, boxW, boxH);
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(boxX, boxY, boxW, boxH, 4);
+            ctx.fill();
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          } else {
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.lineWidth = 1;
+            ctx.strokeRect(boxX, boxY, boxW, boxH);
+          }
 
           if (lbl.style === 'dark-style') ctx.fillStyle = '#FFFFFF';
           else if (lbl.style === 'road-style') ctx.fillStyle = '#78350F';
@@ -852,9 +986,9 @@ export class ExportService {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
-          const startY = pt.y - ((lines.length - 1) * lineH) / 2;
+          const startY = boxY + boxH / 2 - ((lines.length - 1) * lineH) / 2;
           lines.forEach((lineText, lIdx) => {
-            ctx.fillText(lineText, pt.x, startY + lIdx * lineH);
+            ctx.fillText(lineText, boxX + boxW / 2, startY + lIdx * lineH);
           });
 
           ctx.restore();

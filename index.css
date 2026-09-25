@@ -711,6 +711,64 @@ body.presentation-active .waypoint-node-group {
   width: 100%;
   height: 100%;
   pointer-events: none;
+  z-index: 12;
+}
+
+/* Summary & Whole-Map Persistent Waypoint Notes Layer */
+.stage-summary-notes-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 18;
+}
+
+.summary-node-note-badge {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  margin-top: -16px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #F8FAFC;
+  border: 1.5px solid #F59E0B;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-family: var(--font-formal);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.65);
+  pointer-events: auto;
+  max-width: 270px;
+  min-width: 130px;
+  text-align: left;
+  letter-spacing: 0.01em;
+  white-space: normal;
+  z-index: 24;
+  animation: fadeInNote 0.25s ease-out;
+}
+
+.summary-node-note-badge::after {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 7px 6px 0;
+  border-style: solid;
+  border-color: #F59E0B transparent transparent;
+}
+
+@keyframes fadeInNote {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -90%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%) scale(1);
+  }
 }
 
 .permanent-map-label {
@@ -732,6 +790,7 @@ body.presentation-active .waypoint-node-group {
   cursor: pointer;
   letter-spacing: 0.02em;
   user-select: none;
+  max-width: 220px;
   transition: transform 0.15s ease, border-color 0.15s ease;
 }
 

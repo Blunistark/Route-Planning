@@ -733,17 +733,41 @@ function ensureSvgMarkers() {
   defs.innerHTML = markersHtml;
 }
 
-// Render Permanent Labels (supports custom font family, size, preset style, and multi-line text)
+// Render Permanent Labels (supports custom font family, size, preset style, multi-line text, and de-cluttering)
 function renderPermanentLabels() {
   stagePermanentLabelsLayer.innerHTML = '';
   if (!appState.permanentLabels) appState.permanentLabels = [];
+
+  // De-cluttering collision pass: stagger labels that are clustered near each other
+  const labelOffsets = new Map();
+  const labels = appState.permanentLabels;
+  for (let i = 0; i < labels.length; i++) {
+    for (let j = i + 1; j < labels.length; j++) {
+      const la = labels[i];
+      const lb = labels[j];
+      const dx = Math.abs(la.x - lb.x);
+      const dy = Math.abs(la.y - lb.y);
+      if (dx < 130 && dy < 44) {
+        const curA = labelOffsets.get(la.id) || 0;
+        const curB = labelOffsets.get(lb.id) || 0;
+        if (la.y <= lb.y) {
+          labelOffsets.set(la.id, curA - 14);
+          labelOffsets.set(lb.id, curB + 14);
+        } else {
+          labelOffsets.set(la.id, curA + 14);
+          labelOffsets.set(lb.id, curB - 14);
+        }
+      }
+    }
+  }
 
   appState.permanentLabels.forEach(lbl => {
     const el = document.createElement('div');
     el.className = `permanent-map-label ${lbl.style || 'default'}`;
     el.setAttribute('data-label-id', lbl.id);
     el.style.left = `${lbl.x}px`;
-    el.style.top = `${lbl.y}px`;
+    const yOffset = labelOffsets.get(lbl.id) || 0;
+    el.style.top = `${lbl.y + yOffset}px`;
 
     // Apply custom typography
     if (lbl.fontFamily) {
