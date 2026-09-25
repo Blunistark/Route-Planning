@@ -371,12 +371,18 @@ function bindUIEvents() {
   });
 
   btnStartVideoRecording.addEventListener('click', async () => {
+    // Commit any currently focused duration input before capturing frames
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+    animationEngine.compileSteps();
+
     btnStartVideoRecording.disabled = true;
     recordingProgressBox.classList.remove('hidden');
     recordingBtnLabel.textContent = 'Recording video...';
 
     const pacingSelect = document.getElementById('videoPacingSelect');
-    const chosenPacing = pacingSelect?.value || 'slow';
+    const chosenPacing = pacingSelect?.value || 'standard';
     const fpsSelect = document.getElementById('videoFpsSelect');
     const chosenFps = fpsSelect?.value || '60';
 
@@ -1580,10 +1586,17 @@ function updateSidebarLists() {
       drawingTools.branchRoute(route.id);
     });
 
-    card.querySelector('.edit-route-duration').addEventListener('change', (e) => {
-      route.duration = parseFloat(e.target.value) || 3;
-      animationEngine.compileSteps();
-    });
+    const durInput = card.querySelector('.edit-route-duration');
+    const handleDurationChange = (e) => {
+      const val = parseFloat(e.target.value);
+      if (!isNaN(val) && val > 0) {
+        route.duration = Math.max(0.5, Math.min(30, val));
+        animationEngine.compileSteps();
+        renderTimelinePills();
+      }
+    };
+    durInput?.addEventListener('input', handleDurationChange);
+    durInput?.addEventListener('change', handleDurationChange);
 
     card.querySelector('.delete').addEventListener('click', (e) => {
       e.stopPropagation();

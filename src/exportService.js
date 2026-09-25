@@ -292,12 +292,17 @@ export class ExportService {
       ctx.imageSmoothingQuality = 'high';
     }
 
-    const pacing = options.pacing || 'slow';
+    const pacing = options.pacing || 'standard';
     const targetFps = parseInt(options.fps, 10) || 60;
 
-    let paceFactor = 1.35; // Calm, deliberate, cinematic presentation pacing
-    if (pacing === 'standard') {
-      paceFactor = 1.0;
+    // Respect active engine playback speed factor (e.g. 0.75x, 1.0x, 1.5x)
+    const animSpeed = (this.animEngine && typeof this.animEngine.speedFactor === 'number' && this.animEngine.speedFactor > 0)
+      ? this.animEngine.speedFactor
+      : 1.0;
+
+    let paceFactor = 1.0; // Standard 1:1 match with user-configured durations
+    if (pacing === 'slow') {
+      paceFactor = 1.25;
     } else if (pacing === 'brisk') {
       paceFactor = 0.75;
     }
@@ -370,13 +375,12 @@ export class ExportService {
       }
 
       if (step.type === 'route') {
-        // Generous deliberate corridor drawing duration matching the browser experience
-        const baseDuration = (step.routeData?.duration || 3.0) * 1000;
-        const totalRouteDuration = Math.max(3800, baseDuration * 1.3 * paceFactor);
+        // Direct, accurate reflection of the user-configured route duration in seconds
+        const routeSec = parseFloat(step.routeData?.duration) || 3.0;
+        const totalRouteDuration = Math.max(300, Math.round(((routeSec * 1000) / animSpeed) * paceFactor));
 
-        // Phase 1: Smooth camera pan/zoom into corridor framing (first 850ms)
-        // Corridor starts drawing its initial 12% simultaneously so motion is fluid
-        const panDuration = i > 0 ? Math.min(850, totalRouteDuration * 0.25) : 0;
+        // Phase 1: Smooth camera pan/zoom into corridor framing (first 25%, max 450ms)
+        const panDuration = i > 0 ? Math.min(450, Math.round(totalRouteDuration * 0.25)) : 0;
         if (panDuration > 0) {
           await animatePhase(panDuration, (t) => {
             const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
@@ -385,28 +389,29 @@ export class ExportService {
               centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
               centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
             };
-            // Trace the first 12% of route smoothly while camera glides
+            // Trace initial portion of route smoothly while camera glides
             const initialProgress = t * 0.12;
             this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, initialProgress, interpolatedCamera);
           });
         }
 
         // Phase 2: Full deliberate corridor drawing (from 12% to 100%)
-        const remainingDuration = totalRouteDuration - panDuration;
+        const remainingDuration = Math.max(150, totalRouteDuration - panDuration);
         await animatePhase(remainingDuration, (t) => {
           const overallProgress = 0.12 + t * 0.88;
           this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, overallProgress, targetCamera);
         });
 
-        // Phase 3: Hold step snapshot so audience can clearly see the completed corridor
-        const holdDuration = 1800 * paceFactor;
+        // Phase 3: Hold step snapshot proportional to route duration
+        const holdDuration = Math.max(350, Math.min(1200, Math.round(totalRouteDuration * 0.35))) * paceFactor;
         await animatePhase(holdDuration, () => {
           this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
         });
       } else {
         // Non-route step (Stops, Overview, Summary)
+        const stepTimeScale = paceFactor / animSpeed;
         if (i > 0) {
-          const panDuration = 1150 * paceFactor;
+          const panDuration = Math.round(850 * stepTimeScale);
           await animatePhase(panDuration, (t) => {
             const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
             const interpolatedCamera = {
@@ -418,16 +423,15 @@ export class ExportService {
           });
         }
 
-        const drawDuration = 700 * paceFactor;
+        const drawDuration = Math.round(500 * stepTimeScale);
         await animatePhase(drawDuration, (progress) => {
           this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
         });
 
-        const holdDuration = (
-          step.type === 'stop'
-            ? 2400
-            : (step.type === 'overview' || step.type === 'summary' ? 2800 : 1600)
-        ) * paceFactor;
+        const baseHold = step.type === 'stop'
+          ? 1800
+          : (step.type === 'overview' || step.type === 'summary' ? 2200 : 1200);
+        const holdDuration = Math.round(baseHold * stepTimeScale);
 
         await animatePhase(holdDuration, () => {
           this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
