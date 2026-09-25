@@ -86,8 +86,14 @@ let animationEngine = null;
 let presentationMode = null;
 let exportService = null;
 
+let lastZoomBucket = 0;
 canvasEngine.onZoomChange = (scale) => {
   zoomLevelDisplay.textContent = `${Math.round(scale * 100)}%`;
+  const bucket = Math.round(scale * 4); // update every ~25% zoom interval
+  if (bucket !== lastZoomBucket) {
+    lastZoomBucket = bucket;
+    renderPermanentLabels();
+  }
 };
 
 function initApp() {
@@ -385,12 +391,16 @@ function bindUIEvents() {
     const chosenPacing = pacingSelect?.value || 'standard';
     const fpsSelect = document.getElementById('videoFpsSelect');
     const chosenFps = fpsSelect?.value || '60';
+    const orientSelect = document.getElementById('videoOrientationSelect');
+    const chosenOrientation = orientSelect?.value || 'landscape';
+    const noteSizeSelect = document.getElementById('videoNoteSizeSelect');
+    const chosenNoteScale = parseFloat(noteSizeSelect?.value || '1.3');
 
     try {
       await exportService.recordVideo((cur, total, title) => {
         recordingStatusTitle.textContent = `Recording slide: ${title}`;
-        recordingStatusSubtitle.textContent = `Progress ${cur} of ${total} (${Math.round((cur / total) * 100)}%) • Rendering smooth ${chosenFps} FPS frames`;
-      }, { pacing: chosenPacing, fps: chosenFps });
+        recordingStatusSubtitle.textContent = `Progress ${cur} of ${total} (${Math.round((cur / total) * 100)}%) • Rendering ${chosenOrientation} ${chosenFps} FPS frames`;
+      }, { pacing: chosenPacing, fps: chosenFps, orientation: chosenOrientation, noteScale: chosenNoteScale });
     } catch (err) {
       console.error(err);
       alert('Error recording video: ' + err.message);
@@ -563,23 +573,53 @@ function bindUIEvents() {
     hideWaypointPopover();
   });
 
+  const btnPopoverNoteSizeDown = document.getElementById('btnPopoverNoteSizeDown');
+  const btnPopoverNoteSizeUp = document.getElementById('btnPopoverNoteSizeUp');
+  const waypointNoteSizeSelect = document.getElementById('waypointNoteSizeSelect');
+
+  btnPopoverNoteSizeDown?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!waypointNoteSizeSelect) return;
+    const sizes = [13, 15, 18, 22, 26, 32];
+    const cur = parseInt(waypointNoteSizeSelect.value, 10) || 15;
+    const idx = sizes.indexOf(cur);
+    if (idx > 0) {
+      waypointNoteSizeSelect.value = String(sizes[idx - 1]);
+    }
+  });
+
+  btnPopoverNoteSizeUp?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!waypointNoteSizeSelect) return;
+    const sizes = [13, 15, 18, 22, 26, 32];
+    const cur = parseInt(waypointNoteSizeSelect.value, 10) || 15;
+    const idx = sizes.indexOf(cur);
+    if (idx < sizes.length - 1) {
+      waypointNoteSizeSelect.value = String(sizes[idx + 1]);
+    }
+  });
+
   btnSaveWaypointNote?.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!activeWaypointContext) return;
     const { route, waypointIdx } = activeWaypointContext;
     const noteInput = document.getElementById('waypointNodeNoteInput');
     const chkShow = document.getElementById('chkWaypointShowOnStart');
+    const noteSizeSelect = document.getElementById('waypointNoteSizeSelect');
     const text = (noteInput ? noteInput.value : '').trim();
     const showOnStart = chkShow ? chkShow.checked : true;
+    const noteSize = noteSizeSelect ? parseInt(noteSizeSelect.value, 10) : 15;
 
     if (route && route.points && route.points[waypointIdx]) {
       if (text) {
         route.points[waypointIdx].note = text;
         route.points[waypointIdx].showOnStart = showOnStart;
-        showToast(`Saved note on Node #${waypointIdx + 1}!`, '📝');
+        route.points[waypointIdx].noteSize = noteSize;
+        showToast(`Saved note (${noteSize}px) on Node #${waypointIdx + 1}!`, '📝');
       } else {
         delete route.points[waypointIdx].note;
         delete route.points[waypointIdx].showOnStart;
+        delete route.points[waypointIdx].noteSize;
         showToast(`Cleared note on Node #${waypointIdx + 1}`, '🗑');
       }
       syncAppStateReferences();
@@ -595,6 +635,7 @@ function bindUIEvents() {
     if (route && route.points && route.points[waypointIdx]) {
       delete route.points[waypointIdx].note;
       delete route.points[waypointIdx].showOnStart;
+      delete route.points[waypointIdx].noteSize;
       syncAppStateReferences();
       renderRoutesSvg();
       hideWaypointPopover();
@@ -738,36 +779,85 @@ function renderPermanentLabels() {
   stagePermanentLabelsLayer.innerHTML = '';
   if (!appState.permanentLabels) appState.permanentLabels = [];
 
-  // De-cluttering collision pass: stagger labels that are clustered near each other
-  const labelOffsets = new Map();
   const labels = appState.permanentLabels;
-  for (let i = 0; i < labels.length; i++) {
-    for (let j = i + 1; j < labels.length; j++) {
-      const la = labels[i];
-      const lb = labels[j];
-      const dx = Math.abs(la.x - lb.x);
-      const dy = Math.abs(la.y - lb.y);
-      if (dx < 130 && dy < 44) {
-        const curA = labelOffsets.get(la.id) || 0;
-        const curB = labelOffsets.get(lb.id) || 0;
-        if (la.y <= lb.y) {
-          labelOffsets.set(la.id, curA - 14);
-          labelOffsets.set(lb.id, curB + 14);
-        } else {
-          labelOffsets.set(la.id, curA + 14);
-          labelOffsets.set(lb.id, curB - 14);
+  if (labels.length === 0) return;
+
+  const currentScale = (canvasEngine && canvasEngine.scale > 0) ? canvasEngine.scale : 1.0;
+  // Effective required distance in map space increases when zoomed out so labels do not overlap on screen
+  const zoomFactor = Math.max(0.35, Math.min(1.2, currentScale));
+
+  // Measure label bounds in map coordinate space
+  const labelBoxes = labels.map(lbl => {
+    const lines = String(lbl.text || '').split('\n');
+    const fontSize = lbl.fontSize || 11;
+    const lineH = Math.round(fontSize * 1.35);
+    const boxH = Math.round((lines.length * lineH + 10) / zoomFactor);
+    let maxLineLen = 0;
+    lines.forEach(l => { if (l.length > maxLineLen) maxLineLen = l.length; });
+    const boxW = Math.round(Math.min(240, Math.max(75, maxLineLen * fontSize * 0.65 + 16)) / zoomFactor);
+
+    return {
+      lbl,
+      x: lbl.x,
+      y: lbl.y,
+      shiftX: 0,
+      shiftY: 0,
+      w: boxW,
+      h: boxH
+    };
+  });
+
+  // Iterative collision separation pass (staggers clustered labels)
+  for (let iter = 0; iter < 10; iter++) {
+    let hasOverlap = false;
+    for (let i = 0; i < labelBoxes.length; i++) {
+      for (let j = i + 1; j < labelBoxes.length; j++) {
+        const a = labelBoxes[i];
+        const b = labelBoxes[j];
+        const ax = a.x + a.shiftX;
+        const ay = a.y + a.shiftY;
+        const bx = b.x + b.shiftX;
+        const by = b.y + b.shiftY;
+        const pad = 10 / zoomFactor;
+        const reqX = (a.w + b.w) / 2 + pad;
+        const reqY = (a.h + b.h) / 2 + pad;
+        const dx = Math.abs(ax - bx);
+        const dy = Math.abs(ay - by);
+
+        if (dx < reqX && dy < reqY) {
+          hasOverlap = true;
+          if (dy <= dx * 1.2) {
+            const shift = Math.ceil((reqY - dy) / 2) + 2;
+            if (ay <= by) {
+              a.shiftY -= shift;
+              b.shiftY += shift;
+            } else {
+              a.shiftY += shift;
+              b.shiftY -= shift;
+            }
+          } else {
+            const shift = Math.ceil((reqX - dx) / 2) + 2;
+            if (ax <= bx) {
+              a.shiftX -= shift;
+              b.shiftX += shift;
+            } else {
+              a.shiftX += shift;
+              b.shiftX += shift;
+            }
+          }
         }
       }
     }
+    if (!hasOverlap) break;
   }
 
-  appState.permanentLabels.forEach(lbl => {
+  labelBoxes.forEach(box => {
+    const lbl = box.lbl;
     const el = document.createElement('div');
     el.className = `permanent-map-label ${lbl.style || 'default'}`;
     el.setAttribute('data-label-id', lbl.id);
-    el.style.left = `${lbl.x}px`;
-    const yOffset = labelOffsets.get(lbl.id) || 0;
-    el.style.top = `${lbl.y + yOffset}px`;
+    el.style.left = `${Math.round(box.x + box.shiftX)}px`;
+    el.style.top = `${Math.round(box.y + box.shiftY)}px`;
 
     // Apply custom typography
     if (lbl.fontFamily) {
@@ -969,6 +1059,10 @@ function showWaypointPopover(route, waypointIdx, pt) {
   }
   if (chkShow) {
     chkShow.checked = pt.showOnStart !== false;
+  }
+  const noteSizeSelect = document.getElementById('waypointNoteSizeSelect');
+  if (noteSizeSelect) {
+    noteSizeSelect.value = String(pt.noteSize || 15);
   }
   if (btnClear) {
     if (pt.note) {

@@ -25,6 +25,8 @@ export class AnimationEngine {
     // Stage Node Note Callout (for notes on particular nodes when animation starts / traces)
     this.nodeNoteCallout = document.getElementById('stageNodeNoteCallout');
     this.nodeNoteBody = document.getElementById('nodeNoteBody');
+    this.nodeNoteSizeIndicator = document.getElementById('nodeNoteSizeIndicator');
+    this.activeNotePt = null;
     this.nodeNoteTimeout = null;
 
     // Summary Notes Layer (for displaying all notes when animation finishes / zooms out to whole map)
@@ -45,6 +47,37 @@ export class AnimationEngine {
         this.hideNodeNoteCallout();
       });
     }
+
+    const btnNodeNoteSizeDown = document.getElementById('btnNodeNoteSizeDown');
+    if (btnNodeNoteSizeDown) {
+      btnNodeNoteSizeDown.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.stepNodeNoteSize(-2);
+      });
+    }
+
+    const btnNodeNoteSizeUp = document.getElementById('btnNodeNoteSizeUp');
+    if (btnNodeNoteSizeUp) {
+      btnNodeNoteSizeUp.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.stepNodeNoteSize(2);
+      });
+    }
+  }
+
+  stepNodeNoteSize(delta) {
+    if (!this.activeNotePt) return;
+    const cur = this.activeNotePt.noteSize || 15;
+    const next = Math.max(12, Math.min(36, cur + delta));
+    this.activeNotePt.noteSize = next;
+    if (this.nodeNoteBody) {
+      this.nodeNoteBody.style.fontSize = `${next}px`;
+    }
+    if (this.nodeNoteSizeIndicator) {
+      this.nodeNoteSizeIndicator.textContent = `${next}px`;
+    }
+    const sel = document.getElementById('waypointNoteSizeSelect');
+    if (sel) sel.value = String(next);
   }
 
   setSpeed(factor) {
@@ -332,7 +365,7 @@ export class AnimationEngine {
       } else {
         this.hideNodeNoteCallout();
       }
-    } else if (step.type === 'summary') {
+    } else if (step.type === 'summary' || step.type === 'overview') {
       this.hideCalloutDialog();
       this.hideNodeNoteCallout();
       // Render all waypoint notes across all routes so they stay visible when zoomed out to the whole map!
@@ -361,19 +394,75 @@ export class AnimationEngine {
     routes.forEach(route => {
       (route.points || []).forEach(pt => {
         if (pt && pt.note && String(pt.note).trim()) {
-          noteItems.push({ pt, note: String(pt.note).trim(), color: route.color || '#DC2626' });
+          noteItems.push({
+            pt,
+            note: String(pt.note).trim(),
+            color: route.color || '#DC2626',
+            noteSize: pt.noteSize || 14
+          });
         }
       });
     });
 
     if (noteItems.length === 0) return;
 
-    noteItems.forEach((item) => {
+    // Smart collision avoidance for summary notes so badges never stack on top of each other
+    const noteBoxes = noteItems.map(item => {
+      const fontSize = Math.max(12, Math.min(26, item.noteSize || 14));
+      const textLen = item.note.length;
+      const estW = Math.min(280, Math.max(130, textLen * (fontSize * 0.55) + 24));
+      const estH = Math.max(34, Math.round(fontSize * 2.2));
+      return {
+        item,
+        fontSize,
+        w: estW,
+        h: estH,
+        x: item.pt.x,
+        y: item.pt.y,
+        shiftX: 0,
+        shiftY: 0
+      };
+    });
+
+    for (let iter = 0; iter < 8; iter++) {
+      let overlap = false;
+      for (let i = 0; i < noteBoxes.length; i++) {
+        for (let j = i + 1; j < noteBoxes.length; j++) {
+          const a = noteBoxes[i];
+          const b = noteBoxes[j];
+          const ax = a.x + a.shiftX;
+          const ay = a.y + a.shiftY;
+          const bx = b.x + b.shiftX;
+          const by = b.y + b.shiftY;
+          const dx = Math.abs(ax - bx);
+          const dy = Math.abs(ay - by);
+          const reqX = (a.w + b.w) / 2 + 10;
+          const reqY = (a.h + b.h) / 2 + 10;
+          if (dx < reqX && dy < reqY) {
+            overlap = true;
+            if (dy <= dx) {
+              const shift = Math.ceil((reqY - dy) / 2);
+              if (ay <= by) { a.shiftY -= shift; b.shiftY += shift; }
+              else { a.shiftY += shift; b.shiftY -= shift; }
+            } else {
+              const shift = Math.ceil((reqX - dx) / 2);
+              if (ax <= bx) { a.shiftX -= shift; b.shiftX += shift; }
+              else { a.shiftX += shift; b.shiftX -= shift; }
+            }
+          }
+        }
+      }
+      if (!overlap) break;
+    }
+
+    noteBoxes.forEach((box) => {
       const badge = document.createElement('div');
       badge.className = 'summary-node-note-badge';
-      badge.style.left = `${item.pt.x}px`;
-      badge.style.top = `${item.pt.y}px`;
-      badge.textContent = item.note;
+      badge.style.left = `${box.x + box.shiftX}px`;
+      badge.style.top = `${box.y + box.shiftY}px`;
+      badge.style.fontSize = `${box.fontSize}px`;
+      badge.style.maxWidth = `${Math.max(260, box.fontSize * 16)}px`;
+      badge.textContent = box.item.note;
       this.summaryNotesLayer.appendChild(badge);
     });
   }
@@ -404,8 +493,14 @@ export class AnimationEngine {
 
   showNodeNoteCallout(pt, autoDismissMs = 0) {
     if (!this.nodeNoteCallout) return;
+    this.activeNotePt = pt;
+    const noteSize = pt.noteSize || 15;
     if (this.nodeNoteBody) {
       this.nodeNoteBody.textContent = pt.note || '';
+      this.nodeNoteBody.style.fontSize = `${noteSize}px`;
+    }
+    if (this.nodeNoteSizeIndicator) {
+      this.nodeNoteSizeIndicator.textContent = `${noteSize}px`;
     }
     this.nodeNoteCallout.style.left = `${pt.x}px`;
     this.nodeNoteCallout.style.top = `${pt.y}px`;
@@ -500,6 +595,7 @@ export class AnimationEngine {
         this.scheduleNextAutoPlay();
       } else {
         this.pause();
+        this.renderSummaryNotes();
         if (this.onPlaybackFinished) {
           this.onPlaybackFinished();
         }

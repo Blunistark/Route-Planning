@@ -103,8 +103,8 @@ export class ExportService {
     return { scale, offsetX, offsetY, imgW: mapImg.naturalWidth, imgH: mapImg.naturalHeight };
   }
 
-  // Calculate target camera view { zoom, centerX, centerY } for a given step
-  getStepCamera(step) {
+  // Calculate target camera view { zoom, centerX, centerY } for a given step, adapting to canvas aspect ratio
+  getStepCamera(step, canvasW = 1280, canvasH = 720) {
     if (!step) {
       return { zoom: 1.0, centerX: null, centerY: null };
     }
@@ -134,9 +134,19 @@ export class ExportService {
       const imgW = (mapImg && mapImg.naturalWidth > 0) ? mapImg.naturalWidth : 1000;
       const imgH = (mapImg && mapImg.naturalHeight > 0) ? mapImg.naturalHeight : 800;
 
-      const scaleW = (imgW * 0.7) / boxW;
-      const scaleH = (imgH * 0.7) / boxH;
-      const targetZoom = Math.min(Math.max(Math.min(scaleW, scaleH), 1.05), 2.2);
+      const padding = 24;
+      const fitW = Math.max(200, canvasW - padding * 2);
+      const fitH = Math.max(200, canvasH - padding * 2);
+      const baseScale = Math.min(fitW / imgW, fitH / imgH);
+
+      // Fit the corridor bounds comfortably within the viewport
+      const targetZoom = Math.min(
+        Math.max(
+          Math.min((fitW * 0.7) / (boxW * baseScale), (fitH * 0.7) / (boxH * baseScale)),
+          1.05
+        ),
+        2.2
+      );
 
       return {
         zoom: targetZoom,
@@ -281,180 +291,201 @@ export class ExportService {
 
   // -------------------------------------------------------------
   // 2. Video Capture with Camera Zoom and Pan Transitions
+  // Supports Landscape (16:9) & Portrait (9:16) with deterministic frame pipeline
   // -------------------------------------------------------------
   async recordVideo(onProgress, options = {}) {
+    const orientation = options.orientation || 'landscape';
+    const isPortrait = orientation === 'portrait';
+    const canvasWidth = isPortrait ? 720 : 1280;
+    const canvasHeight = isPortrait ? 1280 : 720;
+    const noteScale = parseFloat(options.noteScale) || 1.3;
+
+    // Attach off-screen canvas to DOM temporarily so Chromium's compositor actively pumps frames to captureStream
     const canvas = document.createElement('canvas');
-    canvas.width = 1280;
-    canvas.height = 720;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    if (ctx) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-    }
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    canvas.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-9999;';
+    document.body.appendChild(canvas);
 
-    const pacing = options.pacing || 'standard';
-    const targetFps = parseInt(options.fps, 10) || 60;
-
-    // Respect active engine playback speed factor (e.g. 0.75x, 1.0x, 1.5x)
-    const animSpeed = (this.animEngine && typeof this.animEngine.speedFactor === 'number' && this.animEngine.speedFactor > 0)
-      ? this.animEngine.speedFactor
-      : 1.0;
-
-    let paceFactor = 1.0; // Standard 1:1 match with user-configured durations
-    if (pacing === 'slow') {
-      paceFactor = 1.25;
-    } else if (pacing === 'brisk') {
-      paceFactor = 0.75;
-    }
-
-    const mimeTypes = [
-      'video/webm;codecs=vp9',
-      'video/webm;codecs=vp8',
-      'video/webm',
-      'video/mp4'
-    ];
-    const chosenMime = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || 'video/webm';
-
-    const stream = canvas.captureStream(targetFps);
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: chosenMime,
-      videoBitsPerSecond: targetFps >= 60 ? 8000000 : 5000000
-    });
-
-    const recordedChunks = [];
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) recordedChunks.push(e.data);
-    };
-
-    this.animEngine.compileSteps();
-    const steps = this.animEngine.steps;
-    if (!steps || steps.length === 0) {
-      throw new Error('No presentation steps found to record.');
-    }
-
-    // Pre-render the starting frame before starting recording so initial frame is crisp
-    const firstCamera = this.getStepCamera(steps[0]);
-    this.drawFrameToCanvas(ctx, canvas.width, canvas.height, steps[0], 0, 0.0, firstCamera);
-
-    mediaRecorder.start();
-
-    // Small warm-up buffer for recorder encoder
-    await new Promise(r => setTimeout(r, 60));
-
-    // RequestAnimationFrame-synchronized phase animator based on high-resolution performance.now()
-    const animatePhase = (durationMs, onFrame) => {
-      if (durationMs <= 0) {
-        try { onFrame(1.0); } catch (_) {}
-        return Promise.resolve();
+    try {
+      const ctx = canvas.getContext('2d', { alpha: false });
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
       }
-      return new Promise((resolve) => {
-        let startTime = null;
-        const tick = (now) => {
-          if (startTime === null) startTime = now;
-          const elapsed = now - startTime;
-          const t = Math.min(1.0, elapsed / durationMs);
-          try {
-            onFrame(t);
-          } catch (err) {
-            console.warn('Frame render exception:', err);
-          }
-          if (t < 1.0) {
-            requestAnimationFrame(tick);
-          } else {
-            resolve();
-          }
-        };
-        requestAnimationFrame(tick);
+
+      const pacing = options.pacing || 'standard';
+      const targetFps = parseInt(options.fps, 10) || 60;
+
+      // Respect active engine playback speed factor (e.g. 0.75x, 1.0x, 1.5x)
+      const animSpeed = (this.animEngine && typeof this.animEngine.speedFactor === 'number' && this.animEngine.speedFactor > 0)
+        ? this.animEngine.speedFactor
+        : 1.0;
+
+      let paceFactor = 1.0;
+      if (pacing === 'slow') {
+        paceFactor = 1.25;
+      } else if (pacing === 'brisk') {
+        paceFactor = 0.75;
+      }
+
+      const mimeTypes = [
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+        'video/mp4'
+      ];
+      const chosenMime = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || 'video/webm';
+
+      const stream = canvas.captureStream(targetFps);
+      const videoTrack = stream.getVideoTracks()[0];
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: chosenMime,
+        videoBitsPerSecond: targetFps >= 60 ? 8000000 : 5000000
       });
-    };
 
-    let previousCamera = firstCamera;
-
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      const targetCamera = this.getStepCamera(step);
-
-      if (onProgress) {
-        onProgress(i + 1, steps.length, step.title);
-      }
-
-      if (step.type === 'route') {
-        // Direct, accurate reflection of the user-configured route duration in seconds
-        const routeSec = parseFloat(step.routeData?.duration) || 3.0;
-        const totalRouteDuration = Math.max(300, Math.round(((routeSec * 1000) / animSpeed) * paceFactor));
-
-        // Smooth camera pan into corridor framing if camera position needs adjustment (max 300ms)
-        const panDuration = i > 0 ? Math.min(300, Math.round(totalRouteDuration * 0.2)) : 0;
-        if (panDuration > 0) {
-          await animatePhase(panDuration, (t) => {
-            const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-            const interpolatedCamera = {
-              zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
-              centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
-              centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
-            };
-            this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
-          });
-        }
-
-        // Full route corridor drawing from 0.0 to 1.0 across exact user configured duration
-        await animatePhase(totalRouteDuration, (t) => {
-          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, t, targetCamera);
-        });
-
-        // Crisp hold snapshot so the completed corridor is appreciated before next transition
-        const holdDuration = Math.max(250, Math.min(700, Math.round(totalRouteDuration * 0.25))) * paceFactor;
-        await animatePhase(holdDuration, () => {
-          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
-        });
-      } else {
-        // Non-route step (Stops, Overview, Summary)
-        const stepTimeScale = paceFactor / animSpeed;
-        if (i > 0) {
-          const panDuration = step.type === 'summary' ? Math.round(650 * stepTimeScale) : Math.round(450 * stepTimeScale);
-          await animatePhase(panDuration, (t) => {
-            const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-            const interpolatedCamera = {
-              zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
-              centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
-              centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
-            };
-            this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 0.0, interpolatedCamera);
-          });
-        }
-
-        const drawDuration = Math.round(300 * stepTimeScale);
-        await animatePhase(drawDuration, (progress) => {
-          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, progress, targetCamera);
-        });
-
-        const baseHold = step.type === 'stop'
-          ? 650 // Snappy milestone highlight instead of 1.8s freeze!
-          : (step.type === 'summary' ? 2400 : 1000);
-        const holdDuration = Math.round(baseHold * stepTimeScale);
-
-        await animatePhase(holdDuration, () => {
-          this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, i, 1.0, targetCamera);
-        });
-      }
-
-      previousCamera = targetCamera;
-    }
-
-    // Final hold buffer for clean ending
-    await new Promise(r => setTimeout(r, 400));
-
-    return new Promise((resolve) => {
-      mediaRecorder.onstop = () => {
-        const ext = chosenMime.includes('mp4') ? 'mp4' : 'webm';
-        const blob = new Blob(recordedChunks, { type: chosenMime });
-        const safeTitle = (this.state.title || 'Campus_Plan').replace(/[^a-z0-9_-]/gi, '_');
-        const fileName = `${safeTitle}_animation.${ext}`;
-        triggerBrowserDownload(blob, fileName);
-        resolve(blob);
+      const recordedChunks = [];
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordedChunks.push(e.data);
       };
-      mediaRecorder.stop();
-    });
+
+      this.animEngine.compileSteps();
+      const steps = this.animEngine.steps;
+      if (!steps || steps.length === 0) {
+        throw new Error('No presentation steps found to record.');
+      }
+
+      // Render frame helper with explicit track capture request
+      const renderFrame = (step, stepIdx, progress, camera) => {
+        this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, stepIdx, progress, camera, {
+          noteScale,
+          orientation
+        });
+        if (videoTrack && typeof videoTrack.requestFrame === 'function') {
+          videoTrack.requestFrame();
+        }
+      };
+
+      // Pre-render the starting frame before starting recording so initial frame is crisp
+      const firstCamera = this.getStepCamera(steps[0], canvas.width, canvas.height);
+      renderFrame(steps[0], 0, 0.0, firstCamera);
+
+      mediaRecorder.start(100);
+
+      // Warm-up buffer for recorder encoder
+      await new Promise(r => setTimeout(r, 80));
+
+      // Deterministic frame phase animator: guarantees EVERY frame is rendered without pausing or dropping
+      const animatePhase = async (durationMs, onFrameProgress) => {
+        if (durationMs <= 0) {
+          onFrameProgress(1.0);
+          return;
+        }
+        const totalFrames = Math.max(2, Math.round((durationMs / 1000) * targetFps));
+        const frameIntervalMs = 1000 / targetFps;
+        for (let f = 0; f <= totalFrames; f++) {
+          const t = f / totalFrames;
+          try {
+            onFrameProgress(t);
+          } catch (err) {
+            console.warn('Frame render error:', err);
+          }
+          await new Promise(r => setTimeout(r, frameIntervalMs));
+        }
+      };
+
+      let previousCamera = firstCamera;
+
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        const targetCamera = this.getStepCamera(step, canvas.width, canvas.height);
+
+        if (onProgress) {
+          onProgress(i + 1, steps.length, step.title);
+        }
+
+        if (step.type === 'route') {
+          // Accurate reflection of the user-configured route duration
+          const routeSec = parseFloat(step.routeData?.duration) || 3.0;
+          const totalRouteDuration = Math.max(300, Math.round(((routeSec * 1000) / animSpeed) * paceFactor));
+
+          // Smooth camera pan into corridor framing if camera position needs adjustment (max 300ms)
+          const panDuration = i > 0 ? Math.min(300, Math.round(totalRouteDuration * 0.2)) : 0;
+          if (panDuration > 0) {
+            await animatePhase(panDuration, (t) => {
+              const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+              const interpolatedCamera = {
+                zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
+                centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
+                centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
+              };
+              renderFrame(step, i, 0.0, interpolatedCamera);
+            });
+          }
+
+          // Full route corridor drawing from 0.0 to 1.0 across exact user configured duration
+          await animatePhase(totalRouteDuration, (t) => {
+            renderFrame(step, i, t, targetCamera);
+          });
+
+          // Crisp hold snapshot so the completed corridor is appreciated before next transition
+          const holdDuration = Math.max(250, Math.min(650, Math.round(totalRouteDuration * 0.25))) * paceFactor;
+          await animatePhase(holdDuration, () => {
+            renderFrame(step, i, 1.0, targetCamera);
+          });
+        } else {
+          // Non-route step (Stops, Overview, Summary)
+          const stepTimeScale = paceFactor / animSpeed;
+          if (i > 0) {
+            const panDuration = step.type === 'summary' ? Math.round(650 * stepTimeScale) : Math.round(450 * stepTimeScale);
+            await animatePhase(panDuration, (t) => {
+              const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+              const interpolatedCamera = {
+                zoom: previousCamera.zoom + (targetCamera.zoom - previousCamera.zoom) * ease,
+                centerX: previousCamera.centerX + (targetCamera.centerX - previousCamera.centerX) * ease,
+                centerY: previousCamera.centerY + (targetCamera.centerY - previousCamera.centerY) * ease
+              };
+              renderFrame(step, i, 0.0, interpolatedCamera);
+            });
+          }
+
+          const drawDuration = Math.round(300 * stepTimeScale);
+          await animatePhase(drawDuration, (progress) => {
+            renderFrame(step, i, progress, targetCamera);
+          });
+
+          const baseHold = step.type === 'stop'
+            ? 650 // Snappy milestone highlight
+            : (step.type === 'summary' ? 2200 : 900);
+          const holdDuration = Math.round(baseHold * stepTimeScale);
+
+          await animatePhase(holdDuration, () => {
+            renderFrame(step, i, 1.0, targetCamera);
+          });
+        }
+
+        previousCamera = targetCamera;
+      }
+
+      // Final hold buffer for clean ending
+      await new Promise(r => setTimeout(r, 400));
+
+      return await new Promise((resolve) => {
+        mediaRecorder.onstop = () => {
+          const ext = chosenMime.includes('mp4') ? 'mp4' : 'webm';
+          const blob = new Blob(recordedChunks, { type: chosenMime });
+          const safeTitle = (this.state.title || 'Campus_Plan').replace(/[^a-z0-9_-]/gi, '_');
+          const fileName = `${safeTitle}_${orientation}_animation.${ext}`;
+          triggerBrowserDownload(blob, fileName);
+          resolve(blob);
+        };
+        mediaRecorder.stop();
+      });
+    } finally {
+      if (canvas.parentNode) {
+        canvas.parentNode.removeChild(canvas);
+      }
+    }
   }
 
   // -------------------------------------------------------------
@@ -470,12 +501,12 @@ export class ExportService {
       ctx.imageSmoothingQuality = 'high';
     }
 
-    const camera = cameraOverride || this.getStepCamera(step);
+    const camera = cameraOverride || this.getStepCamera(step, canvas.width, canvas.height);
     this.drawFrameToCanvas(ctx, canvas.width, canvas.height, step, stepIndex, 1.0, camera);
     return canvas.toDataURL('image/jpeg', 0.92);
   }
 
-  drawFrameToCanvas(ctx, width, height, step, stepIndex, progress = 1.0, camera = null) {
+  drawFrameToCanvas(ctx, width, height, step, stepIndex, progress = 1.0, camera = null, renderOptions = {}) {
     ctx.fillStyle = '#0F172A';
     ctx.fillRect(0, 0, width, height);
 
@@ -705,6 +736,8 @@ export class ExportService {
       // 2b. Draw Waypoint Note Callouts
       // PERSISTENT: Visible during active route drawing & hold, AND ALL NOTES VISIBLE when zoomed out to the whole map / summary!
       const activeNotes = [];
+      const noteScale = renderOptions.noteScale || 1.3;
+
       this.state.routes.forEach((route) => {
         const points = route.points;
         if (!points || points.length === 0) return;
@@ -722,7 +755,7 @@ export class ExportService {
             const rawNote = String(p.note || '').trim();
             if (!rawNote) return;
 
-            if (isSummary) {
+            if (isSummary || step.type === 'overview') {
               activeNotes.push({ p, route, rawNote, alpha: 1.0 });
             } else if (isCurrentRoute) {
               const shouldShow = (pIdx === 0)
@@ -737,15 +770,19 @@ export class ExportService {
         });
       });
 
-      // Render Waypoint Note Callouts with Boundary Clamping & Arrow Anchor
+      // Prepare Note Boxes with Dynamic Font Sizing & Collision Avoidance
+      const noteBoxes = [];
       if (activeNotes.length > 0) {
         activeNotes.forEach((noteItem) => {
           const { p, rawNote, alpha } = noteItem;
           const screenP = toScreen(p);
 
-          ctx.font = '500 12.5px "Plus Jakarta Sans", Segoe UI, sans-serif';
+          const baseFontSize = p.noteSize || 15;
+          const fontSize = Math.max(11, Math.round(baseFontSize * noteScale));
+          ctx.font = `600 ${fontSize}px "Plus Jakarta Sans", Segoe UI, sans-serif`;
+
           const words = rawNote.split(/\s+/);
-          const maxTextWidth = 260;
+          const maxTextWidth = Math.min(320, Math.round(width * 0.44));
           const lines = [];
           let currentLine = '';
           for (let w = 0; w < words.length; w++) {
@@ -753,28 +790,28 @@ export class ExportService {
             if (ctx.measureText(testLine).width > maxTextWidth && currentLine) {
               lines.push(currentLine);
               currentLine = words[w];
-              if (lines.length >= 3) break;
+              if (lines.length >= 4) break;
             } else {
               currentLine = testLine;
             }
           }
-          if (currentLine && lines.length < 3) {
+          if (currentLine && lines.length < 4) {
             lines.push(currentLine);
-          } else if (lines.length >= 3 && currentLine) {
-            lines[2] = lines[2].replace(/(\s+[^\s]+)$/, '...');
+          } else if (lines.length >= 4 && currentLine) {
+            lines[3] = lines[3].replace(/(\s+[^\s]+)$/, '...');
           }
 
-          const lineSpacing = 17;
-          const padX = 12;
-          const padY = 9;
+          const lineSpacing = Math.round(fontSize * 1.36);
+          const padX = Math.round(11 * (fontSize / 14));
+          const padY = Math.round(9 * (fontSize / 14));
           let maxMeasuredW = 0;
           lines.forEach(l => {
             const w = ctx.measureText(l).width;
             if (w > maxMeasuredW) maxMeasuredW = w;
           });
 
-          const noteBoxW = Math.min(300, Math.max(130, Math.round(maxMeasuredW + padX * 2)));
-          const noteBoxH = Math.max(34, Math.round(lines.length * lineSpacing + padY * 2));
+          const noteBoxW = Math.min(width - 28, Math.max(140, Math.round(maxMeasuredW + padX * 2)));
+          const noteBoxH = Math.max(38, Math.round(lines.length * lineSpacing + padY * 2));
 
           let noteX = Math.round(screenP.x - noteBoxW / 2);
           noteX = Math.max(14, Math.min(width - noteBoxW - 14, noteX));
@@ -785,10 +822,72 @@ export class ExportService {
             placeAbove = false;
           }
 
+          noteBoxes.push({
+            p,
+            rawNote,
+            alpha,
+            screenP,
+            fontSize,
+            lineSpacing,
+            padX,
+            padY,
+            lines,
+            w: noteBoxW,
+            h: noteBoxH,
+            x: noteX,
+            y: noteY,
+            origX: noteX,
+            origY: noteY,
+            placeAbove
+          });
+        });
+
+        // Note-to-Note Collision Avoidance Pass (Separating Axis Nudge)
+        for (let iter = 0; iter < 8; iter++) {
+          let hasOverlap = false;
+          for (let a = 0; a < noteBoxes.length; a++) {
+            for (let b = a + 1; b < noteBoxes.length; b++) {
+              const bA = noteBoxes[a];
+              const bB = noteBoxes[b];
+              const pad = 8;
+              const cAx = bA.x + bA.w / 2;
+              const cAy = bA.y + bA.h / 2;
+              const cBx = bB.x + bB.w / 2;
+              const cBy = bB.y + bB.h / 2;
+              const ovX = (bA.w + bB.w) / 2 + pad - Math.abs(cAx - cBx);
+              const ovY = (bA.h + bB.h) / 2 + pad - Math.abs(cAy - cBy);
+
+              if (ovX > 0 && ovY > 0) {
+                hasOverlap = true;
+                if (ovY <= ovX) {
+                  const shift = Math.ceil(ovY / 2) + 2;
+                  if (cAy < cBy) { bA.y -= shift; bB.y += shift; }
+                  else { bA.y += shift; bB.y -= shift; }
+                } else {
+                  const shift = Math.ceil(ovX / 2) + 2;
+                  if (cAx < cBx) { bA.x -= shift; bB.x += shift; }
+                  else { bA.x += shift; bB.x += shift; }
+                }
+              }
+            }
+          }
+          if (!hasOverlap) break;
+        }
+
+        // Clamp note boxes within canvas boundaries
+        noteBoxes.forEach(box => {
+          box.x = Math.max(12, Math.min(width - box.w - 12, box.x));
+          box.y = Math.max(12, Math.min(height - box.h - 12, box.y));
+        });
+
+        // Render each De-cluttered Note Box
+        noteBoxes.forEach((box) => {
+          const { screenP, alpha, fontSize, lineSpacing, padX, padY, lines, w: noteBoxW, h: noteBoxH, x: noteX, y: noteY } = box;
+
           ctx.save();
           ctx.globalAlpha = alpha;
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-          ctx.shadowBlur = 14;
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.78)';
+          ctx.shadowBlur = 16;
           ctx.shadowOffsetY = 4;
 
           // Box background
@@ -803,7 +902,7 @@ export class ExportService {
 
           ctx.shadowColor = 'transparent';
           ctx.strokeStyle = '#F59E0B';
-          ctx.lineWidth = 1.6;
+          ctx.lineWidth = 1.8;
           if (ctx.roundRect) {
             ctx.beginPath();
             ctx.roundRect(noteX, noteY, noteBoxW, noteBoxH, 6);
@@ -812,19 +911,20 @@ export class ExportService {
             ctx.strokeRect(noteX, noteY, noteBoxW, noteBoxH);
           }
 
-          // Note text
+          // Note text - Always upright, horizontally readable
           ctx.fillStyle = '#FFFFFF';
-          ctx.font = '500 12.5px "Plus Jakarta Sans", Segoe UI, sans-serif';
+          ctx.font = `600 ${fontSize}px "Plus Jakarta Sans", Segoe UI, sans-serif`;
           ctx.textAlign = 'left';
           ctx.textBaseline = 'top';
           lines.forEach((l, lIdx) => {
             ctx.fillText(l, noteX + padX, noteY + padY + lIdx * lineSpacing);
           });
 
-          // Pointer arrow
+          // Pointer arrow or leader line to node anchor
           const arrowX = Math.max(noteX + 14, Math.min(noteX + noteBoxW - 14, screenP.x));
+          const isAbove = noteY + noteBoxH <= screenP.y;
           ctx.beginPath();
-          if (placeAbove) {
+          if (isAbove) {
             ctx.moveTo(arrowX - 7, noteY + noteBoxH);
             ctx.lineTo(arrowX + 7, noteY + noteBoxH);
             ctx.lineTo(arrowX, noteY + noteBoxH + 8);
@@ -837,23 +937,36 @@ export class ExportService {
           ctx.fillStyle = '#0F172A';
           ctx.fill();
           ctx.strokeStyle = '#F59E0B';
-          ctx.lineWidth = 1.6;
+          ctx.lineWidth = 1.8;
           ctx.stroke();
+
+          // If note box was shifted significantly away from node anchor, draw a subtle connecting leader line
+          const distFromAnchor = Math.hypot((noteX + noteBoxW / 2) - screenP.x, (noteY + (isAbove ? noteBoxH : 0)) - screenP.y);
+          if (distFromAnchor > 35) {
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.75)';
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([3, 3]);
+            ctx.moveTo(screenP.x, screenP.y);
+            ctx.lineTo(arrowX, isAbove ? (noteY + noteBoxH + 8) : (noteY - 8));
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
 
           ctx.restore();
         });
       }
 
-      // 3. Draw Permanent Labels with Intelligent Collision Avoidance & Zoom-Adaptive Typography
-      // Prevents labels from clustering or stacking on top of each other when zoomed out to the whole map!
+      // 3. Draw Permanent Labels with Intelligent Multi-Pass Collision Avoidance
+      // De-clutters labels against other labels, note callouts, and stop pins when zoomed out to the whole map!
       if (this.state.permanentLabels && this.state.showPermanentLabels !== false && this.state.permanentLabels.length > 0) {
         // Measure and prepare bounding boxes in screen coordinates
         const labelBoxes = this.state.permanentLabels.map(lbl => {
           const pt = toScreen({ x: lbl.x, y: lbl.y });
           const fontName = lbl.fontFamily || 'Plus Jakarta Sans';
           const baseSize = lbl.fontSize || 11;
-          // Zoom-adaptive font sizing: gentle dampening so text boxes don't balloon when zoomed out
-          const fontSize = Math.max(8, Math.min(13, Math.round(baseSize * Math.pow(Math.max(0.35, camZoom), 0.5))));
+          // Zoom-adaptive font sizing: gentle dampening so text boxes remain crisp and legible when zoomed out
+          const fontSize = Math.max(9, Math.min(14, Math.round(baseSize * Math.pow(Math.max(0.35, camZoom), 0.45))));
           ctx.font = `bold ${fontSize}px "${fontName}", sans-serif`;
 
           const lines = String(lbl.text || '').split('\n');
@@ -865,7 +978,7 @@ export class ExportService {
 
           const lineH = Math.round(fontSize * 1.3);
           const boxH = Math.round(lines.length * lineH + 6);
-          const boxW = Math.round(maxLineW + 10);
+          const boxW = Math.round(maxLineW + 12);
 
           return {
             lbl,
@@ -881,14 +994,16 @@ export class ExportService {
           };
         });
 
-        // Iterative Collision Avoidance (Separating Axis Nudge)
-        for (let iter = 0; iter < 5; iter++) {
+        // Iterative Collision Avoidance (Separating Axis Nudge against labels, notes, and pins)
+        for (let iter = 0; iter < 10; iter++) {
           let hasOverlap = false;
+
+          // Pass 1: Label vs Label
           for (let a = 0; a < labelBoxes.length; a++) {
             for (let b = a + 1; b < labelBoxes.length; b++) {
               const bA = labelBoxes[a];
               const bB = labelBoxes[b];
-              const pad = 5;
+              const pad = 6;
 
               const cAx = bA.x + bA.w / 2;
               const cAy = bA.y + bA.h / 2;
@@ -900,39 +1015,54 @@ export class ExportService {
 
               if (overlapX > 0 && overlapY > 0) {
                 hasOverlap = true;
-                // Prefer vertical nudge for map labels
-                if (overlapY <= overlapX * 1.25) {
+                if (overlapY <= overlapX * 1.3) {
                   const shift = Math.ceil(overlapY / 2) + 1;
-                  if (cAy < cBy) {
-                    bA.y -= shift;
-                    bB.y += shift;
-                  } else {
-                    bA.y += shift;
-                    bB.y -= shift;
-                  }
+                  if (cAy < cBy) { bA.y -= shift; bB.y += shift; }
+                  else { bA.y += shift; bB.y -= shift; }
                 } else {
                   const shift = Math.ceil(overlapX / 2) + 1;
-                  if (cAx < cBx) {
-                    bA.x -= shift;
-                    bB.x += shift;
-                  } else {
-                    bA.x += shift;
-                    bB.x += shift;
-                  }
+                  if (cAx < cBx) { bA.x -= shift; bB.x += shift; }
+                  else { bA.x += shift; bB.x += shift; }
                 }
               }
             }
           }
+
+          // Pass 2: Label vs Note Boxes
+          for (let a = 0; a < labelBoxes.length; a++) {
+            const bA = labelBoxes[a];
+            for (let n = 0; n < noteBoxes.length; n++) {
+              const bN = noteBoxes[n];
+              const pad = 6;
+              const cAx = bA.x + bA.w / 2;
+              const cAy = bA.y + bA.h / 2;
+              const cNx = bN.x + bN.w / 2;
+              const cNy = bN.y + bN.h / 2;
+              const ovX = (bA.w + bN.w) / 2 + pad - Math.abs(cAx - cNx);
+              const ovY = (bA.h + bN.h) / 2 + pad - Math.abs(cAy - cNy);
+              if (ovX > 0 && ovY > 0) {
+                hasOverlap = true;
+                if (ovY <= ovX) {
+                  const shift = Math.ceil(ovY) + 1;
+                  bA.y += (cAy < cNy) ? -shift : shift;
+                } else {
+                  const shift = Math.ceil(ovX) + 1;
+                  bA.x += (cAx < cNx) ? -shift : shift;
+                }
+              }
+            }
+          }
+
           if (!hasOverlap) break;
         }
 
         // Clamp to canvas borders
         labelBoxes.forEach(box => {
-          box.x = Math.max(6, Math.min(width - box.w - 6, box.x));
-          box.y = Math.max(6, Math.min(height - box.h - 6, box.y));
+          box.x = Math.max(8, Math.min(width - box.w - 8, box.x));
+          box.y = Math.max(8, Math.min(height - box.h - 8, box.y));
         });
 
-        // Render each de-cluttered label
+        // Render each de-cluttered label - Horizontally upright & crystal clear
         labelBoxes.forEach(box => {
           const { lbl, origPt, fontName, fontSize, lineH, lines, w: boxW, h: boxH, x: boxX, y: boxY } = box;
           ctx.font = `bold ${fontSize}px "${fontName}", sans-serif`;
@@ -1033,7 +1163,7 @@ export class ExportService {
         // 5. Draw Callout Dialog Box on Active Stop with smooth opacity fade-in
         if (isActive && step.type === 'stop' && this.state.showDialogOnFocus !== false) {
           // Generous executive callout dimensions for high legibility in video & presentation
-          const dialogW = 380;
+          const dialogW = Math.min(380, width - 36);
           const dialogH = 98;
 
           // Safe positioning with boundary clamping
